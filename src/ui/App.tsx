@@ -1,7 +1,36 @@
 import { useMemo, useState } from "react";
 import { generateTeam, Rng, simulateSeries, type SeriesResult, type Team } from "../engine";
 import { RosterCard } from "./RosterCard";
+import { SeasonView } from "./SeasonView";
 import { SeriesView } from "./SeriesView";
+
+type Tab = "season" | "lab";
+
+export function App() {
+  const [tab, setTab] = useState<Tab>("season");
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark">C</span>
+          <div>
+            <h1>Clutch</h1>
+            <p className="muted">CDL management sim</p>
+          </div>
+        </div>
+        <nav className="tabs">
+          <button className={tab === "season" ? "active" : ""} onClick={() => setTab("season")}>
+            Season
+          </button>
+          <button className={tab === "lab" ? "active" : ""} onClick={() => setTab("lab")}>
+            Match lab
+          </button>
+        </nav>
+      </header>
+      <main className="page">{tab === "season" ? <SeasonView /> : <MatchLab />}</main>
+    </div>
+  );
+}
 
 function buildTeams(seed: string): [Team, Team] {
   const rng = new Rng(`teams:${seed}`);
@@ -11,7 +40,7 @@ function buildTeams(seed: string): [Team, Team] {
   return [a, b];
 }
 
-export function App() {
+function MatchLab() {
   const [teamSeed, setTeamSeed] = useState("opening-night");
   const [seriesSeed, setSeriesSeed] = useState("game-1");
   const [result, setResult] = useState<SeriesResult | null>(null);
@@ -23,10 +52,6 @@ export function App() {
     setTeamSeed(seed);
     setTeams(buildTeams(seed));
     setResult(null);
-  };
-
-  const simulate = () => {
-    setResult(simulateSeries(teams, { seed: seriesSeed }));
   };
 
   const simulateNext = () => {
@@ -42,40 +67,27 @@ export function App() {
   };
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">C</span>
-          <div>
-            <h1>Clutch</h1>
-            <p className="muted">Match engine playground</p>
-          </div>
-        </div>
-        <div className="controls">
-          <label>
-            Teams seed
-            <input value={teamSeed} onChange={(e) => regenerate(e.target.value)} />
-          </label>
-          <label>
-            Series seed
-            <input value={seriesSeed} onChange={(e) => setSeriesSeed(e.target.value)} />
-          </label>
-          <button className="primary" onClick={simulate}>
+    <>
+      <div className="card season-bar">
+        <label>
+          Teams seed
+          <input value={teamSeed} onChange={(e) => regenerate(e.target.value)} />
+        </label>
+        <label>
+          Series seed
+          <input value={seriesSeed} onChange={(e) => setSeriesSeed(e.target.value)} />
+        </label>
+        <div className="season-actions">
+          <button className="primary" onClick={() => setResult(simulateSeries(teams, { seed: seriesSeed }))}>
             Simulate series
           </button>
           <button onClick={simulateNext}>Next series</button>
         </div>
-      </header>
-
-      <main className="layout">
+      </div>
+      <div className="layout">
         <aside className="rosters">
           {teams.map((team, i) => (
-            <RosterCard
-              key={team.id}
-              team={team}
-              side={i as 0 | 1}
-              onAggression={(v) => updateAggression(i as 0 | 1, v)}
-            />
+            <RosterCard key={team.id} team={team} side={i as 0 | 1} onAggression={(v) => updateAggression(i as 0 | 1, v)} />
           ))}
         </aside>
         <section className="series">
@@ -85,13 +97,13 @@ export function App() {
             <div className="empty">
               <h2>Ready to run</h2>
               <p className="muted">
-                Best of five, CDL format: Hardpoint, Search &amp; Destroy, Control, Hardpoint, Search &amp; Destroy.
-                Same seeds always replay the same series.
+                Best of five, CDL format: Hardpoint, Search &amp; Destroy, Control, Hardpoint, Search &amp; Destroy. Same seeds always replay
+                the same series.
               </p>
             </div>
           )}
         </section>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }

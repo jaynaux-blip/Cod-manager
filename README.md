@@ -3,8 +3,9 @@
 A Call of Duty esports management sim, in the spirit of Football Manager. You run a
 CDL-style org: build the roster, set tactics, and watch the matches play out.
 
-This repository currently contains the first building block: a deterministic
-**match engine** and a small web playground to run series and read the play-by-play.
+This repository currently contains the deterministic **match engine**, a full
+**season** with calendar and standings, and a web UI to play through a season
+one match day at a time and read the play-by-play of any series.
 
 ## Run it
 
@@ -28,11 +29,34 @@ src/engine/         Pure TypeScript, no framework dependency
   snd.ts            Search & Destroy, first to 6 of 11, sides swap after round 6
   control.ts        Control, first to 3 of 5, 30 lives, zones A then B
   series.ts         CDL best-of-5: HP, SnD, Control, HP, SnD
+  season.ts         Season calendar, stages, points, standings
+  bracket.ts        8-team double-elimination template and round-robin scheduler
   generate.ts       Procedural fictional teams and players
   maps.ts           Fictional map pool
-src/ui/             React playground (Vite)
+src/ui/             React app (Vite): Season tab and Match lab tab
 scripts/balance.ts  Balance harness
 ```
+
+## Season format
+
+Twelve teams, four Majors, then Champs. All 40 match days are generated up
+front with symbolic team references (group slot, bracket seed, winner or loser
+of a match) that resolve on the day they are played, so a season is plain data
+advanced by `playNextDay`, `playStage` or `playSeason` in `src/engine/season.ts`.
+
+Each Major:
+
+1. **Qualifiers.** Two groups of six, round robin, one match day per week for
+   five weeks. Major I groups are a random draw; later Majors snake-seed the
+   groups from season points. Ties on wins break by head-to-head, then map
+   differential.
+2. **Bracket.** Top four of each group into an eight-team double-elimination
+   bracket over four days (template in `src/engine/bracket.ts`). Group winners
+   seed 1 and 2, runners-up 3 and 4, and so on.
+
+Season points: 10 per qualifier win, plus Major placement points
+(100, 80, 65, 50, 40, 40, 30, 30, 20, 20, 10, 10). The top eight by points play
+Champs, the same bracket, which crowns the champion.
 
 ## How a gunfight is decided
 
@@ -72,6 +96,6 @@ maps evenly regardless of which side attacks first.
 
 ## Next
 
-In rough order: season calendar and standings, contracts and finances, then
-morale, media and scouting on top of this engine. The engine is UI-free on purpose
+In rough order: contracts, salary cap and finances, then morale, media and
+scouting, then multi-season progression with aging and generated rookies. The engine is UI-free on purpose
 so a headless season sim can run thousands of matches for balance testing.

@@ -30,8 +30,7 @@ export interface GenerateOptions {
 
 const ROLE_SET: Role[] = ["AR", "AR", "SMG", "SMG"];
 
-export function generateTeam(rng: Rng, id: string, opts: GenerateOptions): Team {
-  const org = rng.pick(ORG_NAMES);
+export function generateTeam(rng: Rng, id: string, opts: GenerateOptions, org = rng.pick(ORG_NAMES)): Team {
   const name = opts.name ?? `${org[0]} ${org[1]}`;
   const tag = opts.tag ?? org[1].slice(0, 3).toUpperCase();
   const usedTags = new Set<string>();
@@ -70,9 +69,13 @@ export function generatePlayer(rng: Rng, id: string, name: string, role: Role, t
   return { id, name, role, age: rng.int(18, 29), attributes };
 }
 
+/** Rating band for a generated league. Narrow on purpose: see the balance harness. */
+export const LEAGUE_TIER_RANGE: [number, number] = [71, 83];
+
 export function generateLeague(seed: string, count = 12): Team[] {
   const rng = new Rng(seed);
+  const orgs = rng.shuffle(ORG_NAMES);
   return Array.from({ length: count }, (_, i) =>
-    generateTeam(rng.fork(`team${i}`), `team-${i}`, { tier: rng.int(62, 86) }),
+    generateTeam(rng.fork(`team${i}`), `team-${i}`, { tier: rng.int(...LEAGUE_TIER_RANGE) }, orgs[i % orgs.length]),
   );
 }
