@@ -238,10 +238,17 @@ export function playNextDay(season: Season): Season {
   const problem = lineupProblem(season);
   if (problem) throw new Error(problem);
   const day = season.days[season.currentDay];
+  // In preseason AI clubs pick their training program first, so their payroll budget reflects it.
+  const finances =
+    season.currentDay === 0
+      ? Object.fromEntries(
+          Object.entries(season.finances).map(([id, f]) => [id, id === season.userTeamId ? f : { ...f, training: aiTrainingLevel(f, true) }]),
+        )
+      : season.finances;
   const ai = aiPrepareRosters(
     season.teams,
     season.freeAgents,
-    season.finances,
+    finances,
     season.userTeamId,
     new Rng(`${season.seed}:${season.year}:ai:${day.day}`),
     { upgrades: season.currentDay === 0, idPrefix: `cu-${season.year}-${day.day}` },
@@ -250,7 +257,7 @@ export function playNextDay(season: Season): Season {
     ...season,
     teams: ai.teams,
     freeAgents: ai.freeAgents,
-    finances: { ...season.finances },
+    finances: { ...finances },
     stages: season.stages.map((s) => ({ ...s })),
     fixtures: season.fixtures.slice(),
     points: { ...season.points },
@@ -283,7 +290,7 @@ export function playNextDay(season: Season): Season {
 
   for (const team of next.teams) {
     let fin = next.finances[team.id];
-    if (team.id !== next.userTeamId) fin = { ...fin, training: aiTrainingLevel(fin, season.currentDay === 0) };
+    if (team.id !== next.userTeamId) fin = { ...fin, training: aiTrainingLevel(fin, false) };
     next.finances[team.id] = post(fin, dailyEntries(team, fin, next.year, day.day, next.days.length));
   }
 

@@ -2,6 +2,7 @@
  * Front-office logic for clubs the player does not manage.
  */
 import {
+  withContract,
   addToRoster,
   askingSalary,
   autoLineup,
@@ -59,17 +60,24 @@ export function aiPrepareRosters(
     const inDebt = (fin?.balance ?? 0) < 0;
     const budget = fin ? aiPayrollBudget(fin) : Infinity;
     const sign = (p: Player, salary: number, years: number) => {
-      team = addToRoster(team, { ...p, contract: { salary, years } });
+      team = addToRoster(team, withContract(p, { salary, years }));
       pool = pool.filter((x) => x.id !== p.id);
       changed = true;
     };
 
     while (rosterOf(team).length < CONTRACT_RULES.lineupSize) {
       const years = rng.int(1, 2);
-      // A solvent club over budget still prefers the cheapest real free agent to an academy kid.
-      const pick = bestAffordable(team, pool, prestige, years, budget, inDebt) ?? (inDebt ? null : cheapestAffordable(team, pool, prestige, years));
+      const pick = bestAffordable(team, pool, prestige, years, budget, inDebt);
+      // A solvent club over budget still prefers the cheapest real free agent to
+      // an academy kid, but only on a one-season deal and only if cash covers
+      // the overspend, so it cannot lock itself into years of debt.
+      const fallback = pick || inDebt ? null : cheapestAffordable(team, pool, prestige, 1);
+      const overspend = fallback ? payroll(team) + fallback.salary - budget : 0;
+      const affordable = fallback && overspend <= Math.max(0, fin?.balance ?? 0) / 2 ? fallback : null;
       if (pick) {
         sign(pick.player, pick.salary, years);
+      } else if (affordable) {
+        sign(affordable.player, affordable.salary, 1);
       } else {
         const role: Role = rng.pick(["AR", "SMG", "Flex"]);
         const callUp = generatePlayer(rng, `${opts.idPrefix}-${callUps++}`, names.next(), role, CALL_UP_TIER, 4);

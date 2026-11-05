@@ -13,9 +13,11 @@ import {
   removeFromRoster,
   rosterOf,
   updatePlayer,
+  withContract,
 } from "./contracts";
 import { CALL_UP_TIER } from "./ai";
-import { post, TRAINING_LEVELS } from "./finance";
+import { DEV_RULES, futureSeasonsLeft } from "./development";
+import { post, trainingCost, TRAINING_LEVELS } from "./finance";
 import { generatePlayer, NameGen } from "./generate";
 import { withDevelopment } from "./scouting";
 import { Rng } from "./rng";
@@ -66,6 +68,20 @@ function checkTerms(offer: Offer): string | null {
   return null;
 }
 
+/**
+ * Longest deal a free agent can sign before reaching the hard age limit.
+ * Mid-season the current season counts as the first.
+ */
+export function maxSigningYears(season: Season, p: Player): number {
+  const future = futureSeasonsLeft(p, isOffseason(season));
+  return Math.min(CONTRACT_RULES.maxYears, isOffseason(season) ? future : 1 + future);
+}
+
+/** Longest extension a player can agree before reaching the hard age limit. */
+export function maxExtensionYears(season: Season, p: Player): number {
+  return Math.min(CONTRACT_RULES.maxYears, futureSeasonsLeft(p, isOffseason(season)));
+}
+
 export function prestigeOf(season: Season, teamId: string): number {
   return season.finances[teamId]?.prestige ?? 50;
 }
@@ -90,6 +106,11 @@ export function signFreeAgent(season: Season, teamId: string, playerId: string, 
   if (rosterOf(team).length >= CONTRACT_RULES.rosterMax) {
     return fail(`The roster is full at ${CONTRACT_RULES.rosterMax}. Release someone first.`);
   }
+  const maxYears = maxSigningYears(season, player);
+  if (maxYears < 1) return fail(`${player.name} reaches the retirement age of ${DEV_RULES.hardRetireAge} and cannot sign.`);
+  if (offer.years > maxYears) {
+    return fail(`${player.name} reaches the retirement age of ${DEV_RULES.hardRetireAge} and can sign for at most ${maxYears} ${maxYears === 1 ? "season" : "seasons"}.`);
+  }
   if (season.finances[teamId].balance < 0 && offer.salary > CONTRACT_RULES.minSalary) {
     return fail(`The club is in debt and can only sign players at the league minimum (${money(CONTRACT_RULES.minSalary)}).`);
   }
@@ -110,7 +131,7 @@ export function signFreeAgent(season: Season, teamId: string, playerId: string, 
   }
   // In the offseason the finished season still counts until rollover, so add one.
   const years = isOffseason(season) ? offer.years + 1 : offer.years;
-  const signed: Player = { ...player, contract: { salary: offer.salary, years } };
+  const signed = withContract(player, { salary: offer.salary, years });
   const next = replaceTeam(season, addToRoster(team, signed));
   next.freeAgents = season.freeAgents.filter((p) => p.id !== playerId);
   return { ok: true, season: next, message: `${player.name} signs for ${money(offer.salary)} a season.` };
@@ -123,6 +144,11 @@ export function extendContract(season: Season, teamId: string, playerId: string,
   if (!player?.contract) return fail("That player is not under contract with this club.");
   if (player.contract.years !== 1) return fail("Only players in the final season of their deal can be extended.");
   if (player.contract.extension) return fail(`${player.name} has already agreed an extension.`);
+  const maxYears = maxExtensionYears(season, player);
+  if (maxYears < 1) return fail(`${player.name} retires at ${DEV_RULES.hardRetireAge} at the end of this season and cannot be extended.`);
+  if (offer.years > maxYears) {
+    return fail(`${player.name} reaches the retirement age of ${DEV_RULES.hardRetireAge} and can extend for at most ${maxYears} ${maxYears === 1 ? "season" : "seasons"}.`);
+  }
   const terms = checkTerms(offer);
   if (terms) return fail(terms);
   const ask = extensionAsk(season, teamId, player, offer.years);
@@ -154,7 +180,7 @@ export function releasePlayer(season: Season, teamId: string, playerId: string):
   const fin = season.finances[teamId];
   if (cost > 0 && fin.balance < cost) return fail(`The ${money(cost)} buyout is more than the club has in the bank.`);
   const next = replaceTeam(season, removeFromRoster(team, playerId));
-  const freed: Player = { ...player };
+  const freed: Player = { ...player, freedIn: season.year };
   delete freed.contract;
   next.freeAgents = [...season.freeAgents, freed];
   if (cost > 0) {
@@ -204,25 +230,31 @@ export function callUpAcademyPlayer(season: Season, teamId: string): TxResult {
   if (rosterOf(team).length >= CONTRACT_RULES.lineupSize) {
     return fail("Academy call-ups are only for clubs that cannot field four players.");
   }
-  const everyone = [...season.teams.flatMap(rosterOf), ...season.freeAgents];
+  // In the offseason the finished season still counts until rollover.
+  const contract = { salary: CONTRACT_RULES.minSalary, years: isOffseason(season) ? 2 : 1 };
   const prefix = `ac-${season.year}-${teamId}-`;
+  // A kid this club released comes back, so releasing and calling up again
+  // cannot be used to reroll for a better prospect.
+  const returning = season.freeAgents.filter((p) => p.id.startsWith(prefix)).sort((a, b) => a.id.localeCompare(b.id))[0];
+  if (returning) {
+    const next = replaceTeam(season, addToRoster(team, withContract(returning, contract)));
+    next.freeAgents = season.freeAgents.filter((p) => p.id !== returning.id);
+    return { ok: true, season: next, message: `${returning.name} returns from the academy on a ${money(CONTRACT_RULES.minSalary)} deal.` };
+  }
+  const everyone = [...season.teams.flatMap(rosterOf), ...season.freeAgents];
   const n = everyone.filter((p) => p.id.startsWith(prefix)).length;
   const rng = new Rng(`${season.seed}:${season.year}:academy:${teamId}:${n}`);
   const names = new NameGen(rng.fork("names"), everyone.map((p) => p.name));
   const base = generatePlayer(rng, `${prefix}${n}`, names.next(), rng.pick(["AR", "SMG", "Flex"] as const), CALL_UP_TIER, 4);
-  const player: Player = {
-    ...withDevelopment({ ...base, age: rng.int(18, 20) }, rng),
-    // In the offseason the finished season still counts until rollover.
-    contract: { salary: CONTRACT_RULES.minSalary, years: isOffseason(season) ? 2 : 1 },
-  };
+  const player = withContract(withDevelopment({ ...base, age: rng.int(18, 20) }, rng), contract);
   const next = replaceTeam(season, addToRoster(team, player));
   return { ok: true, season: next, message: `${player.name} is called up from the academy on a ${money(CONTRACT_RULES.minSalary)} deal.` };
 }
 
 /**
  * Set the club's training program. The cost is charged per match day from
- * now on. Raising it is refused while the club is in debt; lowering is always
- * allowed.
+ * now on. Raising it needs a season of the extra cost in the bank, so it is
+ * refused in debt; lowering is always allowed.
  */
 export function setTrainingLevel(season: Season, teamId: string, level: number): TxResult {
   const fin = season.finances[teamId];
@@ -230,6 +262,10 @@ export function setTrainingLevel(season: Season, teamId: string, level: number):
   if (!program || !Number.isInteger(level)) return fail("Unknown training program.");
   if (level === fin.training) return fail(`The club already runs ${level === 0 ? "no program" : `the ${program.name} program`}.`);
   if (level > fin.training && fin.balance < 0) return fail("The club is in debt and cannot raise its training spend.");
+  const extra = program.cost - trainingCost(fin);
+  if (level > fin.training && fin.balance < extra) {
+    return fail(`Raising to the ${program.name} program needs ${money(extra)} in the bank to cover a season of the extra cost.`);
+  }
   const next = { ...season, finances: { ...season.finances, [teamId]: { ...fin, training: level } } };
   const message =
     level === 0 ? "Training program cancelled." : `${program.name}: ${money(program.cost)} a season, charged per match day.`;

@@ -2,8 +2,8 @@
  * League lifecycle: creating a new league and rolling a finished season into
  * the next one.
  */
-import { aiExtendExpiring, aiPayrollBudget } from "./ai";
-import { DEV_RULES, retirementChance, type DevReport, type Retirement } from "./development";
+import { aiExtendExpiring, aiPayrollBudget, aiTrainingLevel } from "./ai";
+import { DEV_RULES, retirementChance, satWholeSeasonUnsigned, type DevReport, type Retirement } from "./development";
 import { autoLineup, rosterOf } from "./contracts";
 import { settleFans } from "./finance";
 import { generateFreeAgents, generateLeague } from "./generate";
@@ -70,10 +70,17 @@ export function startNextSeason(season: Season): Season {
   const retired: Retirement[] = [];
   const retire = (p: Player, teamId: string | null, forced: boolean) =>
     retired.push({ playerId: p.id, name: p.name, age: p.age, overall: overall(p), teamId, forced });
+  // Fans settle and AI clubs choose next season's training before any budget is set.
+  const finances = Object.fromEntries(
+    Object.entries(season.finances).map(([id, f]) => {
+      const settled = settleFans(f);
+      return [id, id === season.userTeamId ? settled : { ...settled, training: aiTrainingLevel(settled, true) }];
+    }),
+  );
 
   const teams = season.teams.map((team) => {
     const isUser = team.id === season.userTeamId;
-    const fin = season.finances[team.id];
+    const fin = finances[team.id];
     const budget = fin ? aiPayrollBudget(fin) : Infinity;
     const decided = isUser ? team : aiExtendExpiring(team, fin?.prestige ?? 50, rng, budget);
     const roll = (list: Player[]): Player[] =>
@@ -85,7 +92,7 @@ export function startNextSeason(season: Season): Season {
           return [];
         }
         if (staying) return [{ ...p, contract: staying }];
-        const fa: Player = { ...p };
+        const fa: Player = { ...p, freedIn: season.year };
         delete fa.contract;
         leaving.push({ player: fa, teamId: team.id });
         return [];
@@ -101,7 +108,7 @@ export function startNextSeason(season: Season): Season {
     else stayers.push(player);
   }
   for (const p of season.freeAgents) {
-    if (rolls(p, true)) retire(p, null, false);
+    if (rolls(p, satWholeSeasonUnsigned(p, season.year))) retire(p, null, false);
     else stayers.push(p);
   }
 
@@ -112,7 +119,7 @@ export function startNextSeason(season: Season): Season {
     usedNames,
     tier: [60, 76],
     age: [18, 20],
-  });
+  }).map((p) => ({ ...p, freedIn: season.year }));
   const ranked = [...stayers, ...rookies].sort((a, b) => outlook(b) - outlook(a) || a.id.localeCompare(b.id));
   const freeAgents = ranked.slice(0, LEAGUE_RULES.maxFreeAgents);
   const left = ranked.slice(LEAGUE_RULES.maxFreeAgents).map((p) => p.name);
@@ -127,7 +134,7 @@ export function startNextSeason(season: Season): Season {
     year,
     userTeamId: season.userTeamId,
     freeAgents,
-    finances: Object.fromEntries(Object.entries(season.finances).map(([id, fin]) => [id, settleFans(fin)])),
+    finances,
     development,
   });
 }

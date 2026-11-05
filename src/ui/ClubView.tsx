@@ -2,6 +2,10 @@ import { useMemo, useState } from "react";
 import {
   benchPlayer,
   buyoutCost,
+  DEV_RULES,
+  futureSeasonsLeft,
+  maxExtensionYears,
+  maxSigningYears,
   callUpAcademyPlayer,
   CONTRACT_RULES,
   EXPENSE_KINDS,
@@ -212,7 +216,8 @@ function OvrCell({ p, change }: { p: Player; change?: DevChange }) {
 /**
  * Chance a player in the last season of his deal retires if he is unsigned
  * when the next season starts. Development, and the birthday, happen when
- * Champs ends, so during the season the risk is judged a year older.
+ * Champs ends, so during the season the risk is judged a year older on
+ * today's ratings and is only an estimate.
  */
 function retirementRisk(season: Season, p: Player): number {
   const c = p.contract;
@@ -221,13 +226,29 @@ function retirementRisk(season: Season, p: Player): number {
 }
 
 function PlayerBadges({ season, p }: { season: Season; p: Player }) {
-  const risk = retirementRisk(season, p);
+  const offseason = isFinished(season);
+  // Under contract or not, nobody plays on past the hard age limit.
+  const atLimit = !!p.contract && futureSeasonsLeft(p, offseason) === 0;
+  const risk = atLimit ? 0 : retirementRisk(season, p);
   return (
     <>
       {p.age <= PROSPECT_AGE && <span className="badge">Prospect</span>}
+      {atLimit && (
+        <span className="badge warn" title={`Players retire at ${DEV_RULES.hardRetireAge}. He cannot be extended.`}>
+          Retires at season end
+        </span>
+      )}
       {risk >= 0.05 && (
-        <span className="badge warn" title="Chance he retires if he is unsigned when the next season starts. Extend him to keep him.">
-          Retire risk {Math.round(risk * 100)}%
+        <span
+          className="badge warn"
+          title={
+            offseason
+              ? "Chance he retires if he is unsigned when the next season starts. Extend him to keep him."
+              : "Estimated chance he retires if unsigned when the next season starts. It is updated when Champs ends, after development. Extend him to keep him."
+          }
+        >
+          Retire risk {offseason ? "" : "~"}
+          {Math.round(risk * 100)}%
         </span>
       )}
     </>
@@ -244,7 +265,7 @@ function RosterPanel({ season, team, negotiation, setNegotiation, apply }: Panel
 
   const row = (p: Player, starter: boolean) => {
     const c = p.contract;
-    const canExtend = c?.years === 1 && !c.extension;
+    const canExtend = c?.years === 1 && !c.extension && maxExtensionYears(season, p) >= 1;
     const cost = buyoutCost(season, p);
     const negotiating = negotiation?.kind === "extend" && negotiation.playerId === p.id;
     const swapChoice = team.players.some((s) => s.id === swapFor[p.id]) ? swapFor[p.id] : "";
@@ -497,6 +518,7 @@ function NegotiationForm({
   onOffer: (offer: { salary: number; years: number }) => void;
   onCancel: () => void;
 }) {
+  const maxYears = Math.max(1, kind === "sign" ? maxSigningYears(season, player) : maxExtensionYears(season, player));
   const askFor = (years: number) =>
     kind === "sign" ? freeAgentAsk(season, team.id, player, years) : extensionAsk(season, team.id, player, years);
   const [years, setYears] = useState(1);
@@ -531,7 +553,7 @@ function NegotiationForm({
               setSalary(askFor(y));
             }}
           >
-            {Array.from({ length: CONTRACT_RULES.maxYears }, (_, i) => i + 1).map((y) => (
+            {Array.from({ length: maxYears }, (_, i) => i + 1).map((y) => (
               <option key={y} value={y}>
                 {y}
               </option>

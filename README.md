@@ -91,7 +91,8 @@ substitutes.
 - **Multi-season signings** made mid-season must fit both this season's cap and
   next season's, where agreed extensions take effect.
 - **Academy call-ups.** A club that cannot field four can call up an academy
-  player at the league minimum, even in debt. AI clubs do the same.
+  player at the league minimum, even in debt. AI clubs do the same. A kid you
+  release comes back if you call up again, so call-ups cannot be rerolled.
 - **Your club** is chosen before a new league's first match day and is fixed
   after that.
 - **Roster lock.** Signings and releases are blocked during Champs. Lineup
@@ -125,11 +126,14 @@ season's ratings and ages before any contract decision. The model lives in
   23, which produces breakouts and busts.
 - **Decline** starts after the peak age and grows by 0.8 a year, to at most 4
   a season. Aim falls fastest while game sense and comms keep improving, so
-  veterans become in-game leaders.
+  veterans become in-game leaders. Those gains stop at 95.
 - **Retirement** happens when the next season starts. Unsigned players retire
-  on an age curve, sooner if they are weak; fringe players who sat a whole
-  season unsigned are pushed out. Contracted players only retire at 34. Final
-  year players show their retirement risk so you can extend them first.
+  on an age curve, sooner if their scouted outlook is weak; fringe players who
+  were already unsigned when the season started are pushed out, and the
+  youngest feel half of both pushes. Contracted players only retire at 34, so
+  no deal or extension may run past that age. Final-year players show their
+  retirement risk so you can extend them first; during the season it is an
+  estimate until development runs.
 - **Rookie class.** Eight rookies aged 18 to 20 join each year, and the pool is
   trimmed by scouted outlook so high-ceiling rookies are not cut.
 - **Pricing** includes a share of a young player's visible upside, and
@@ -146,18 +150,20 @@ season's ratings and ages before any contract decision. The model lives in
 | Elite program | $1.4M | 43% |
 
 The cost is charged per match day as "Coaching and facilities". The boost is
-based on what was actually spent that season, speeds growth, slows decline by
-half as much, and never raises a ceiling. Raising the program is refused in
-debt. AI clubs fund training from three quarters of their cash above a $1M
+based on what was actually spent that season, speeds growth, slows the
+losses from decline by half as much, and never raises a ceiling or lowers any
+attribute. Raising the program needs a season of the extra cost in the bank. AI clubs fund training from three quarters of their cash above a $1M
 reserve and cancel it in debt. In a controlled test the top program is worth
 about 1.3 overall points over three seasons for the same players.
 
 ### AI spending
 
 AI clubs budget payroll from recurring income, expected prize money for their
-prestige, and a quarter of cash above $1M. Gap signings rank free agents by
-scouted outlook, so prospects get minutes; preseason upgrades rank by current
-rating. Fan bases drift 30% of the way back to a prestige baseline each
+prestige, and a quarter of cash above $1M, after choosing next season's
+training program. Gap signings rank free agents by scouted outlook, so
+prospects get minutes; if nobody fits the budget a solvent club may overspend
+on a one-season deal only as far as half its cash covers. Preseason upgrades
+rank by current rating. Fan bases drift 30% of the way back to a prestige baseline each
 offseason, so a dynasty's merch income cannot compound forever.
 
 `npm run economy` tracks all of this over several seasons: rating drift, stars,

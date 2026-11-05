@@ -11,7 +11,7 @@
 import { trainingBoost, trainingSpend } from "./finance";
 import { exactOverall, overall, OVERALL_WEIGHTS } from "./ratings";
 import { clamp, Rng } from "./rng";
-import { devOf, potentialRange } from "./scouting";
+import { devOf, outlook, potentialRange } from "./scouting";
 import type { Season } from "./season";
 import { ATTRIBUTE_KEYS, type AttributeKey, type Attributes, type Player } from "./types";
 
@@ -42,6 +42,8 @@ export const DEV_RULES = {
   profileJitterSd: 0.3,
   /** Contracted players retire at this age regardless; the contract is voided. */
   hardRetireAge: 34,
+  /** Attributes that improve with age stop improving from this rating. */
+  ageGainCeiling: 95,
 };
 
 export interface DevContext {
@@ -89,14 +91,23 @@ export function developPlayer(p: Player, ctx: DevContext, rng: Rng): DevResult {
   const ageMult = clamp((dev.peakAge + 1 - p.age) / 3, 0, 1);
   const growth = Math.max(0, dev.potential - exactOverall(p)) * R.growthShare * ageMult * reps * (1 + ctx.boost);
   const yearsPast = p.age - dev.peakAge;
-  const decline = yearsPast > 0 ? Math.min(R.maxDecline, R.declinePerYear * yearsPast) * (1 - ctx.boost / 2) : 0;
+  const rawDecline = yearsPast > 0 ? Math.min(R.maxDecline, R.declinePerYear * yearsPast) : 0;
+  const decline = rawDecline * (1 - ctx.boost / 2);
 
+  // Attributes that improve with age stop improving near the top of the scale,
+  // and the decline is spread over the rest instead.
+  const profile = { ...declineProfile };
+  for (const k of ATTRIBUTE_KEYS) if (profile[k] < 0 && p.attributes[k] >= R.ageGainCeiling) profile[k] = 0;
+  // Training slows only the losses. Gains from experience are the same with or
+  // without it, so a bigger program can never lower any attribute.
+  const lost = spread(decline, profile);
+  const gained = spread(rawDecline, profile);
   const up = spread(growth + noise, growthProfile);
-  const down = spread(decline, declineProfile);
   const attributes = { ...p.attributes } as Attributes;
   ATTRIBUTE_KEYS.forEach((k, i) => {
+    const down = profile[k] < 0 ? gained[k] : lost[k];
     // Stochastic rounding keeps attributes whole numbers without bias.
-    const delta = Math.floor(up[k] - down[k] + rounding[i]);
+    const delta = Math.floor(up[k] - down + rounding[i]);
     attributes[k] = clamp(p.attributes[k] + delta, 1, 99);
   });
 
@@ -239,10 +250,22 @@ export function retirementChance(p: Player, satUnsigned: boolean): number {
   if (p.age >= DEV_RULES.hardRetireAge) return 1;
   if (p.age >= 33) return 1;
   let chance = p.age <= 23 ? 0 : RETIRE_BY_AGE[p.age] ?? 0;
-  const ovr = overall(p);
-  chance += clamp((72 - ovr) * 0.03, 0, 0.3);
-  if (ovr >= 82) chance -= 0.1;
+  // Judged on scouted outlook, so a raw teenager with a high ceiling is not
+  // treated as a washout, and the youngest only feel half the push.
+  const view = outlook(p);
+  const youth = p.age <= 21 ? 0.5 : 1;
+  chance += youth * clamp((72 - view) * 0.03, 0, 0.3);
+  if (overall(p) >= 82) chance -= 0.1;
   // A season without a club pushes fringe players out, not good ones priced out of the market.
-  if (satUnsigned && ovr < 75) chance += 0.15;
+  if (satUnsigned && view < 75) chance += youth * 0.15;
   return clamp(chance, 0, 1);
+}
+
+/** Whether a free agent was already unsigned before season `year` started. */
+export const satWholeSeasonUnsigned = (p: Player, year: number): boolean => (p.freedIn ?? -Infinity) < year;
+
+/** Seasons after the current one a player can still play before the hard age limit. */
+export function futureSeasonsLeft(p: Player, offseason: boolean): number {
+  const ageNextSeason = offseason ? p.age : p.age + 1;
+  return Math.max(0, DEV_RULES.hardRetireAge - ageNextSeason);
 }

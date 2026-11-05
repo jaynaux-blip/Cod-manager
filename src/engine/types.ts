@@ -53,6 +53,12 @@ export interface Player {
   contract?: Contract;
   /** Generated players always carry this. Hand-built players fall back to devOf(). */
   dev?: Development;
+  /**
+   * Free agents only: the season during or after which the player became
+   * unsigned. A free agent who was already unsigned before a season started
+   * sat that whole season unsigned. Missing means unsigned from the start.
+   */
+  freedIn?: number;
 }
 
 export interface Tactics {

@@ -81,6 +81,13 @@ export function fitsUnderCap(currentPayroll: number, salary: number): boolean {
   return salary <= CONTRACT_RULES.minSalary || currentPayroll + salary <= CONTRACT_RULES.salaryCap;
 }
 
+/** Put a player under contract, clearing free-agent bookkeeping. */
+export function withContract(p: Player, contract: NonNullable<Player["contract"]>): Player {
+  const signed: Player = { ...p, contract };
+  delete signed.freedIn;
+  return signed;
+}
+
 /** Fill the lineup first, then the bench. */
 export function addToRoster(t: Team, p: Player): Team {
   return t.players.length < CONTRACT_RULES.lineupSize
