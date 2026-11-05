@@ -1,56 +1,72 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  createSeason,
   describeRef,
   fixturesForDay,
-  generateLeague,
   groupStandings,
   isFinished,
-  overall,
+  lineupProblem,
+  lineupRating,
   playNextDay,
   playSeason,
   playStage,
   seasonStandings,
+  setUserTeam,
+  startNextSeason,
   teamById,
   type Fixture,
   type Season,
-  type Team,
 } from "../engine";
 import { SeriesView } from "./SeriesView";
 
-function newSeason(seed: string): Season {
-  return createSeason(seed, generateLeague(`league:${seed}`));
+interface Props {
+  season: Season;
+  setSeason: (s: Season) => void;
+  seed: string;
+  onNewLeague: (seed: string) => void;
+  onGoToClub: () => void;
 }
 
-export function SeasonView() {
-  const [seed, setSeed] = useState("season-2026");
-  const [season, setSeason] = useState<Season>(() => newSeason("season-2026"));
+export function SeasonView({ season, setSeason, seed, onNewLeague, onGoToClub }: Props) {
   const [openFixture, setOpenFixture] = useState<Fixture | null>(null);
-
-  const reset = (s: string) => {
-    setSeed(s);
-    setSeason(newSeason(s));
-    setOpenFixture(null);
-  };
 
   const finished = isFinished(season);
   const today = finished ? null : season.days[season.currentDay];
   const stageIndex = today?.stage ?? season.stages.length - 1;
   const stage = season.stages[stageIndex];
+  const problem = lineupProblem(season);
+  const blocked = finished || problem !== null;
 
   return (
     <div className="season">
       <div className="card season-bar">
         <label>
-          Season seed
-          <input value={seed} onChange={(e) => reset(e.target.value)} />
+          League seed
+          <input value={seed} onChange={(e) => onNewLeague(e.target.value)} />
+        </label>
+        <label>
+          Managing
+          <select value={season.userTeamId ?? ""} onChange={(e) => setSeason(setUserTeam(season, e.target.value))}>
+            {season.teams
+              .slice()
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+          </select>
         </label>
         <div className="progress">
           {finished ? (
-            <strong>Season complete. Champion: {teamById(season, season.champion!).name}</strong>
+            <>
+              <strong>Season {season.year} complete. Champion: {teamById(season, season.champion!).name}</strong>
+              <span className="muted">Offseason: handle expiring contracts on the Club tab, then start the next season.</span>
+            </>
           ) : (
             <>
-              <strong>{today!.label}</strong>
+              <strong>
+                Season {season.year} · {today!.label}
+              </strong>
               <span className="muted">
                 Day {season.currentDay + 1} of {season.days.length}
               </span>
@@ -58,17 +74,33 @@ export function SeasonView() {
           )}
         </div>
         <div className="season-actions">
-          <button className="primary" disabled={finished} onClick={() => setSeason(playNextDay(season))}>
-            Play day
-          </button>
-          <button disabled={finished} onClick={() => setSeason(playStage(season))}>
-            Play {stage.kind === "champs" ? "Champs" : "Major"}
-          </button>
-          <button disabled={finished} onClick={() => setSeason(playSeason(season))}>
-            Play season
-          </button>
-          <button onClick={() => reset(seed)}>Restart</button>
+          {finished ? (
+            <button className="primary" onClick={() => setSeason(startNextSeason(season))}>
+              Start season {season.year + 1}
+            </button>
+          ) : (
+            <>
+              <button className="primary" disabled={blocked} onClick={() => setSeason(playNextDay(season))}>
+                Play day
+              </button>
+              <button disabled={blocked} onClick={() => setSeason(playStage(season))}>
+                Play {stage.kind === "champs" ? "Champs" : "Major"}
+              </button>
+              <button disabled={blocked} onClick={() => setSeason(playSeason(season))}>
+                Play season
+              </button>
+            </>
+          )}
+          <button onClick={() => onNewLeague(seed)}>New league</button>
         </div>
+        {problem && (
+          <div className="notice err full-width">
+            {problem}{" "}
+            <button className="link" onClick={onGoToClub}>
+              Go to Club
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="season-grid">
@@ -94,10 +126,6 @@ export function SeasonView() {
       )}
     </div>
   );
-}
-
-function teamOvr(t: Team): number {
-  return Math.round(t.players.reduce((s, p) => s + overall(p), 0) / t.players.length);
 }
 
 function StandingsTable({ season }: { season: Season }) {
@@ -128,14 +156,14 @@ function StandingsTable({ season }: { season: Season }) {
             const team = teamById(season, r.teamId);
             const champion = season.champion === r.teamId;
             return (
-              <tr key={r.teamId} className={i < 8 ? "qualified" : ""}>
+              <tr key={r.teamId} className={`${i < 8 ? "qualified" : ""} ${r.teamId === season.userTeamId ? "mine" : ""}`}>
                 <td className="muted">{i + 1}</td>
                 <td className="name">
                   <span className="tag">{team.tag}</span>
                   {team.name}
                   {champion && <span className="crown"> ★</span>}
                 </td>
-                <td className="muted">{teamOvr(team)}</td>
+                <td className="muted">{lineupRating(team)}</td>
                 <td className="strong">{r.points}</td>
                 <td>
                   {r.wins}-{r.losses}

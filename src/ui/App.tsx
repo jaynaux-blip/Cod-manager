@@ -1,13 +1,24 @@
 import { useMemo, useState } from "react";
-import { generateTeam, Rng, simulateSeries, type SeriesResult, type Team } from "../engine";
+import { createLeague, generateTeam, money, Rng, simulateSeries, teamById, type Season, type SeriesResult, type Team } from "../engine";
+import { ClubView } from "./ClubView";
 import { RosterCard } from "./RosterCard";
 import { SeasonView } from "./SeasonView";
 import { SeriesView } from "./SeriesView";
 
-type Tab = "season" | "lab";
+type Tab = "season" | "club" | "lab";
+
+const DEFAULT_SEED = "league-2026";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("season");
+  const [seed, setSeed] = useState(DEFAULT_SEED);
+  const [season, setSeason] = useState<Season>(() => createLeague(DEFAULT_SEED));
+  const newLeague = (s: string) => {
+    setSeed(s);
+    setSeason(createLeague(s));
+  };
+  const club = season.userTeamId ? teamById(season, season.userTeamId) : null;
+  const balance = club ? season.finances[club.id].balance : 0;
   return (
     <div className="app">
       <header className="topbar">
@@ -18,16 +29,32 @@ export function App() {
             <p className="muted">CDL management sim</p>
           </div>
         </div>
+        {club && (
+          <div className="club-chip">
+            <span className="tag">{club.tag}</span>
+            <span>{club.name}</span>
+            <span className={balance < 0 ? "bad" : "muted"}>{money(balance)}</span>
+          </div>
+        )}
         <nav className="tabs">
           <button className={tab === "season" ? "active" : ""} onClick={() => setTab("season")}>
             Season
+          </button>
+          <button className={tab === "club" ? "active" : ""} onClick={() => setTab("club")}>
+            Club
           </button>
           <button className={tab === "lab" ? "active" : ""} onClick={() => setTab("lab")}>
             Match lab
           </button>
         </nav>
       </header>
-      <main className="page">{tab === "season" ? <SeasonView /> : <MatchLab />}</main>
+      <main className="page">
+        {tab === "season" && (
+          <SeasonView season={season} setSeason={setSeason} seed={seed} onNewLeague={newLeague} onGoToClub={() => setTab("club")} />
+        )}
+        {tab === "club" && <ClubView season={season} setSeason={setSeason} />}
+        {tab === "lab" && <MatchLab />}
+      </main>
     </div>
   );
 }

@@ -10,10 +10,13 @@
  * are resolved on the day they are played, so a season is plain data that can
  * be advanced one match day at a time.
  */
+import { aiPrepareRosters } from "./ai";
 import { BRACKET_DAYS, BRACKET_PLACEMENTS, DOUBLE_ELIM_8, roundRobin, type BracketSource } from "./bracket";
+import { CONTRACT_RULES } from "./contracts";
+import { applyPlacement, applySeriesResult, dailyEntries, initialFinances, post, type TeamFinances } from "./finance";
 import { Rng } from "./rng";
 import { simulateSeries } from "./series";
-import type { SeriesResult, Team } from "./types";
+import type { Player, SeriesResult, Team } from "./types";
 
 export const SEASON_RULES = {
   teams: 12,
@@ -72,8 +75,15 @@ export interface Stage {
 }
 
 export interface Season {
+  /** League seed. Stays the same across seasons; `year` tells them apart. */
   seed: string;
+  /** Season number, starting at 1. */
+  year: number;
+  /** The club the player manages. AI clubs handle their own rosters. */
+  userTeamId: string | null;
   teams: Team[];
+  freeAgents: Player[];
+  finances: Record<string, TeamFinances>;
   stages: Stage[];
   fixtures: Fixture[];
   days: MatchDay[];
@@ -103,7 +113,15 @@ export interface SeasonStandingRow extends StandingRow {
 // Creation
 // ---------------------------------------------------------------------------
 
-export function createSeason(seed: string, teams: Team[]): Season {
+export interface SeasonOptions {
+  year?: number;
+  userTeamId?: string | null;
+  freeAgents?: Player[];
+  /** Carried over from the previous season; new clubs start from initialFinances. */
+  finances?: Record<string, TeamFinances>;
+}
+
+export function createSeason(seed: string, teams: Team[], opts: SeasonOptions = {}): Season {
   if (teams.length !== SEASON_RULES.teams) {
     throw new Error(`A season needs exactly ${SEASON_RULES.teams} teams`);
   }
@@ -124,7 +142,11 @@ export function createSeason(seed: string, teams: Team[]): Season {
 
   return {
     seed,
+    year: opts.year ?? 1,
+    userTeamId: opts.userTeamId ?? null,
     teams,
+    freeAgents: opts.freeAgents ?? [],
+    finances: Object.fromEntries(teams.map((t) => [t.id, opts.finances?.[t.id] ?? initialFinances(t)])),
     stages,
     fixtures,
     days,
@@ -185,12 +207,42 @@ function addBracket(stage: number, name: string, fixtures: Fixture[], days: Matc
 
 export const isFinished = (season: Season): boolean => season.currentDay >= season.days.length;
 
-/** Play the next match day. Returns a new Season; the input is not mutated. */
+/** Why the managed club cannot play the next day, or null if it can. */
+export function lineupProblem(season: Season): string | null {
+  if (!season.userTeamId || isFinished(season)) return null;
+  const team = teamById(season, season.userTeamId);
+  const n = team.players.length;
+  if (n === CONTRACT_RULES.lineupSize) return null;
+  return n < CONTRACT_RULES.lineupSize
+    ? `${team.name} only has ${n} starters. Start a substitute or sign a free agent.`
+    : `${team.name} has ${n} starters. Move someone to the bench.`;
+}
+
+/**
+ * Play the next match day. Returns a new Season; the input is not mutated.
+ *
+ * Before the games, AI clubs fill any roster gaps (and on the first day of a
+ * season, make preseason signings). After them, every club books the day's
+ * income and costs, and a finished stage pays out prize money.
+ */
 export function playNextDay(season: Season): Season {
   if (isFinished(season)) return season;
+  const problem = lineupProblem(season);
+  if (problem) throw new Error(problem);
   const day = season.days[season.currentDay];
+  const ai = aiPrepareRosters(
+    season.teams,
+    season.freeAgents,
+    season.finances,
+    season.userTeamId,
+    new Rng(`${season.seed}:${season.year}:ai:${day.day}`),
+    { upgrades: season.currentDay === 0, idPrefix: `cu-${season.year}-${day.day}` },
+  );
   const next: Season = {
     ...season,
+    teams: ai.teams,
+    freeAgents: ai.freeAgents,
+    finances: { ...season.finances },
     stages: season.stages.map((s) => ({ ...s })),
     fixtures: season.fixtures.slice(),
     points: { ...season.points },
@@ -208,20 +260,27 @@ export function playNextDay(season: Season): Season {
     const awayId = resolveRef(next, fixture.away);
     const home = teamById(next, homeId);
     const away = teamById(next, awayId);
-    const result = simulateSeries([home, away], { seed: `${next.seed}:${fixture.id}` });
+    const result = simulateSeries([home, away], { seed: `${next.seed}:${next.year}:${fixture.id}` });
     fixture.homeId = homeId;
     fixture.awayId = awayId;
     fixture.result = result;
     next.fixtures[i] = fixture;
+    next.finances[homeId] = applySeriesResult(next.finances[homeId], result.winner === 0);
+    next.finances[awayId] = applySeriesResult(next.finances[awayId], result.winner === 1);
     if (fixture.phase === "qualifier") {
       const winnerId = result.winner === 0 ? homeId : awayId;
       next.points[winnerId] += SEASON_RULES.pointsPerQualifierWin;
     }
   }
 
+  for (const team of next.teams) {
+    const fin = next.finances[team.id];
+    next.finances[team.id] = post(fin, dailyEntries(team, fin, next.year, day.day, next.days.length));
+  }
+
   next.currentDay = season.currentDay + 1;
   const stageOver = next.currentDay >= next.days.length || next.days[next.currentDay].stage !== day.stage;
-  if (stageOver) finishStage(next, stage);
+  if (stageOver) finishStage(next, stage, day.day);
   return next;
 }
 
@@ -239,7 +298,7 @@ export function playSeason(season: Season): Season {
   return s;
 }
 
-function finishStage(season: Season, stage: Stage): void {
+function finishStage(season: Season, stage: Stage, day: number): void {
   const placements: Record<string, number> = {};
   for (const { match, outcome, place } of BRACKET_PLACEMENTS) {
     const f = fixtureById(season, `S${stage.index}-${match}`);
@@ -260,7 +319,16 @@ function finishStage(season: Season, stage: Stage): void {
   } else {
     season.champion = Object.entries(placements).find(([, p]) => p === 1)![0];
   }
+  for (const [teamId, place] of Object.entries(placements)) {
+    season.finances[teamId] = applyPlacement(season.finances[teamId], place, stage.kind, season.year, day, `${placeLabel(place)} at ${stage.name}`);
+  }
   stage.placements = placements;
+}
+
+export function placeLabel(place: number): string {
+  const tied = place === 5 || place === 7 || place === 9 || place === 11;
+  const suffix = place === 1 ? "st" : place === 2 ? "nd" : place === 3 ? "rd" : "th";
+  return `${tied ? "T-" : ""}${place}${suffix}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +339,7 @@ function finishStage(season: Season, stage: Stage): void {
 function drawGroups(season: Season, stage: Stage): [string[], string[]] {
   let order: string[];
   if (stage.index === 0) {
-    order = new Rng(`${season.seed}:draw`).shuffle(season.teams.map((t) => t.id));
+    order = new Rng(`${season.seed}:${season.year}:draw`).shuffle(season.teams.map((t) => t.id));
   } else {
     order = seasonStandings(season).map((r) => r.teamId);
   }

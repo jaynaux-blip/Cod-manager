@@ -16,12 +16,28 @@ export type AttributeKey = (typeof ATTRIBUTE_KEYS)[number];
 /** All attributes are on a 1-99 scale. */
 export type Attributes = Record<AttributeKey, number>;
 
+export interface ContractTerms {
+  /** Salary in dollars per season. */
+  salary: number;
+  /** Number of seasons. */
+  years: number;
+}
+
+export interface Contract extends ContractTerms {
+  /** Seasons remaining, including the current one. 1 means this is the final season. */
+  years: number;
+  /** New terms agreed in the final season, starting next season. */
+  extension?: ContractTerms;
+}
+
 export interface Player {
   id: string;
   name: string;
   role: Role;
   age: number;
   attributes: Attributes;
+  /** Free agents have no contract. */
+  contract?: Contract;
 }
 
 export interface Tactics {
@@ -33,7 +49,10 @@ export interface Team {
   id: string;
   name: string;
   tag: string;
+  /** The four starters. The match engine only ever plays these. */
   players: Player[];
+  /** Substitutes under contract. Lineup plus bench is capped by CONTRACT_RULES.rosterMax. */
+  bench: Player[];
   tactics: Tactics;
 }
 
