@@ -14,7 +14,10 @@ import {
   rosterOf,
   updatePlayer,
 } from "./contracts";
+import { CALL_UP_TIER } from "./ai";
 import { post } from "./finance";
+import { generatePlayer, NameGen } from "./generate";
+import { Rng } from "./rng";
 import { isFinished, teamById, type Season } from "./season";
 import type { ContractTerms, Player, Team } from "./types";
 
@@ -86,7 +89,9 @@ export function signFreeAgent(season: Season, teamId: string, playerId: string, 
   if (rosterOf(team).length >= CONTRACT_RULES.rosterMax) {
     return fail(`The roster is full at ${CONTRACT_RULES.rosterMax}. Release someone first.`);
   }
-  if (season.finances[teamId].balance < 0) return fail("The club is in debt and cannot sign players.");
+  if (season.finances[teamId].balance < 0 && offer.salary > CONTRACT_RULES.minSalary) {
+    return fail(`The club is in debt and can only sign players at the league minimum (${money(CONTRACT_RULES.minSalary)}).`);
+  }
   const ask = freeAgentAsk(season, teamId, player, offer.years);
   if (offer.salary < ask) {
     return fail(`${player.name} wants at least ${money(ask)} a season over ${offer.years} ${offer.years === 1 ? "season" : "seasons"}.`);
@@ -94,6 +99,13 @@ export function signFreeAgent(season: Season, teamId: string, playerId: string, 
   const current = capPayroll(season, team);
   if (!fitsUnderCap(current, offer.salary)) {
     return fail(`That deal puts payroll ${money(current + offer.salary - CONTRACT_RULES.salaryCap)} over the cap.`);
+  }
+  // A multi-season deal signed mid-season also has to fit next season, where agreed extensions kick in.
+  if (!isOffseason(season) && offer.years > 1) {
+    const next = nextSeasonPayroll(team);
+    if (!fitsUnderCap(next, offer.salary)) {
+      return fail(`That deal puts next season's payroll ${money(next + offer.salary - CONTRACT_RULES.salaryCap)} over the cap.`);
+    }
   }
   // In the offseason the finished season still counts until rollover, so add one.
   const years = isOffseason(season) ? offer.years + 1 : offer.years;
@@ -109,6 +121,7 @@ export function extendContract(season: Season, teamId: string, playerId: string,
   const player = findOnRoster(team, playerId);
   if (!player?.contract) return fail("That player is not under contract with this club.");
   if (player.contract.years !== 1) return fail("Only players in the final season of their deal can be extended.");
+  if (player.contract.extension) return fail(`${player.name} has already agreed an extension.`);
   const terms = checkTerms(offer);
   if (terms) return fail(terms);
   const ask = extensionAsk(season, teamId, player, offer.years);
@@ -178,4 +191,30 @@ export function startPlayer(season: Season, teamId: string, playerId: string, sw
   }
   const next = replaceTeam(season, { ...team, players, bench });
   return { ok: true, season: next, message: `${player.name} joins the lineup.` };
+}
+
+/**
+ * Promote an academy player at the league minimum. Only for a club that cannot
+ * field four: the same safety net AI clubs have. Allowed in debt and while
+ * rosters are locked, since without it the club could not play.
+ */
+export function callUpAcademyPlayer(season: Season, teamId: string): TxResult {
+  const team = teamById(season, teamId);
+  if (rosterOf(team).length >= CONTRACT_RULES.lineupSize) {
+    return fail("Academy call-ups are only for clubs that cannot field four players.");
+  }
+  const everyone = [...season.teams.flatMap(rosterOf), ...season.freeAgents];
+  const prefix = `ac-${season.year}-${teamId}-`;
+  const n = everyone.filter((p) => p.id.startsWith(prefix)).length;
+  const rng = new Rng(`${season.seed}:${season.year}:academy:${teamId}:${n}`);
+  const names = new NameGen(rng.fork("names"), everyone.map((p) => p.name));
+  const base = generatePlayer(rng, `${prefix}${n}`, names.next(), rng.pick(["AR", "SMG", "Flex"] as const), CALL_UP_TIER, 4);
+  const player: Player = {
+    ...base,
+    age: rng.int(18, 20),
+    // In the offseason the finished season still counts until rollover.
+    contract: { salary: CONTRACT_RULES.minSalary, years: isOffseason(season) ? 2 : 1 },
+  };
+  const next = replaceTeam(season, addToRoster(team, player));
+  return { ok: true, season: next, message: `${player.name} is called up from the academy on a ${money(CONTRACT_RULES.minSalary)} deal.` };
 }

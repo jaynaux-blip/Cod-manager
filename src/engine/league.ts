@@ -4,11 +4,15 @@
  */
 import { aiExtendExpiring } from "./ai";
 import { autoLineup, rosterOf } from "./contracts";
+import { sustainablePayroll } from "./finance";
 import { generateFreeAgents, generateLeague } from "./generate";
 import { overall } from "./ratings";
 import { Rng } from "./rng";
 import { createSeason, isFinished, type Season } from "./season";
 import type { Player, Team } from "./types";
+
+/** Share of sustainable payroll an AI club in debt commits to in extensions. */
+export const DEBT_PAYROLL_SHARE = 0.85;
 
 export const LEAGUE_RULES = {
   startingFreeAgents: 18,
@@ -59,7 +63,10 @@ export function startNextSeason(season: Season): Season {
 
   const teams = season.teams.map((team) => {
     const isUser = team.id === season.userTeamId;
-    const decided = isUser ? team : aiExtendExpiring(team, season.finances[team.id]?.prestige ?? 50, rng);
+    const fin = season.finances[team.id];
+    // Clubs in debt budget below break-even so they climb back out.
+    const budget = fin && fin.balance < 0 ? sustainablePayroll(fin) * DEBT_PAYROLL_SHARE : Infinity;
+    const decided = isUser ? team : aiExtendExpiring(team, fin?.prestige ?? 50, rng, budget);
     const roll = (list: Player[]): Player[] =>
       list.flatMap((p) => {
         const c = p.contract;
@@ -94,7 +101,17 @@ export function startNextSeason(season: Season): Season {
   });
 }
 
-/** Switch which club the player manages. */
+/**
+ * The managed club can only be chosen before a new league's first match day.
+ * Switching later would let the manager release a rival's players on the
+ * rival's money and then sign them.
+ */
+export function canChangeClub(season: Season): boolean {
+  return season.year === 1 && season.currentDay === 0;
+}
+
+/** Choose which club the player manages. Ignored once the league has started. */
 export function setUserTeam(season: Season, teamId: string): Season {
+  if (!canChangeClub(season)) return season;
   return { ...season, userTeamId: teamId };
 }

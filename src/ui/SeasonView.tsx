@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  canChangeClub,
   describeRef,
   fixturesForDay,
   groupStandings,
@@ -45,7 +46,12 @@ export function SeasonView({ season, setSeason, seed, onNewLeague, onGoToClub }:
         </label>
         <label>
           Managing
-          <select value={season.userTeamId ?? ""} onChange={(e) => setSeason(setUserTeam(season, e.target.value))}>
+          <select
+            value={season.userTeamId ?? ""}
+            disabled={!canChangeClub(season)}
+            title={canChangeClub(season) ? undefined : "Your club is fixed once the league starts. Start a new league to pick another."}
+            onChange={(e) => setSeason(setUserTeam(season, e.target.value))}
+          >
             {season.teams
               .slice()
               .sort((a, b) => a.name.localeCompare(b.name))
@@ -106,7 +112,7 @@ export function SeasonView({ season, setSeason, seed, onNewLeague, onGoToClub }:
       <div className="season-grid">
         <div className="season-left">
           <StandingsTable season={season} />
-          <StageBrowser season={season} currentStage={stageIndex} onOpen={setOpenFixture} />
+          <StageBrowser key={`${seed}-${season.year}`} season={season} currentStage={stageIndex} onOpen={setOpenFixture} />
         </div>
         <Calendar season={season} onOpen={setOpenFixture} />
       </div>
@@ -196,7 +202,8 @@ function placeClass(p: number | null): string {
 
 function StageBrowser({ season, currentStage, onOpen }: { season: Season; currentStage: number; onOpen: (f: Fixture) => void }) {
   const [picked, setPicked] = useState<number | null>(null);
-  const stage = picked ?? currentStage;
+  // A pick for a stage that has not started yet falls back to the current stage.
+  const stage = picked !== null && picked <= currentStage ? picked : currentStage;
   const started = (i: number) => i <= currentStage;
   return (
     <div className="card">

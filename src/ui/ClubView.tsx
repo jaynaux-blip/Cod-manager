@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   benchPlayer,
   buyoutCost,
+  callUpAcademyPlayer,
   CONTRACT_RULES,
   EXPENSE_KINDS,
   extendContract,
@@ -162,7 +163,11 @@ function contractLabel(p: Player, offseason: boolean): string {
   if (!c) return "-";
   const left = offseason ? c.years - 1 : c.years;
   const ext = c.extension ? ` · extended ${c.extension.years}y at ${money(c.extension.salary)}` : "";
-  if (left <= 0) return `Expiring${ext}`;
+  if (left <= 0) {
+    return c.extension
+      ? `Extended: ${c.extension.years} ${c.extension.years === 1 ? "season" : "seasons"} at ${money(c.extension.salary)}`
+      : "Expiring";
+  }
   if (left === 1 && !offseason) return `Final season${ext}`;
   return `${left} ${left === 1 ? "season" : "seasons"}${ext}`;
 }
@@ -179,6 +184,7 @@ function RosterPanel({ season, team, negotiation, setNegotiation, apply }: Panel
     const canExtend = c?.years === 1 && !c.extension;
     const cost = buyoutCost(season, p);
     const negotiating = negotiation?.kind === "extend" && negotiation.playerId === p.id;
+    const swapChoice = team.players.some((s) => s.id === swapFor[p.id]) ? swapFor[p.id] : "";
     return (
       <tbody key={p.id}>
         <tr className={starter ? "" : "bench-row"}>
@@ -188,7 +194,7 @@ function RosterPanel({ season, team, negotiation, setNegotiation, apply }: Panel
           <td className="strong">{overall(p)}</td>
           <td className="muted">{money(marketValue(p))}</td>
           <td>{c ? money(c.salary) : "-"}</td>
-          <td className={c?.years === 1 && !c.extension ? "expiring" : "muted"}>{contractLabel(p, offseason)}</td>
+          <td className={c?.years === 1 && !c.extension ? "expiring" : c?.extension ? "extended" : "muted"}>{contractLabel(p, offseason)}</td>
           <td className="actions">
             {starter ? (
               <button className="sm" onClick={() => apply(benchPlayer(season, team.id, p.id))}>
@@ -196,7 +202,7 @@ function RosterPanel({ season, team, negotiation, setNegotiation, apply }: Panel
               </button>
             ) : lineupFull ? (
               <span className="swap">
-                <select value={swapFor[p.id] ?? ""} onChange={(e) => setSwapFor({ ...swapFor, [p.id]: e.target.value })}>
+                <select value={swapChoice} onChange={(e) => setSwapFor({ ...swapFor, [p.id]: e.target.value })}>
                   <option value="">Swap for…</option>
                   {team.players.map((s) => (
                     <option key={s.id} value={s.id}>
@@ -204,11 +210,7 @@ function RosterPanel({ season, team, negotiation, setNegotiation, apply }: Panel
                     </option>
                   ))}
                 </select>
-                <button
-                  className="sm"
-                  disabled={!swapFor[p.id]}
-                  onClick={() => apply(startPlayer(season, team.id, p.id, swapFor[p.id]))}
-                >
+                <button className="sm" disabled={!swapChoice} onClick={() => apply(startPlayer(season, team.id, p.id, swapChoice))}>
                   Start
                 </button>
               </span>
@@ -292,6 +294,23 @@ function RosterPanel({ season, team, negotiation, setNegotiation, apply }: Panel
           )}
         </tbody>
         {team.bench.map((p) => row(p, false))}
+        {rosterOf(team).length < CONTRACT_RULES.lineupSize && (
+          <tbody>
+            <tr>
+              <td colSpan={8}>
+                <div className="academy">
+                  <span>
+                    The club cannot field four. Sign a free agent, or call up an academy player at the league minimum. Call-ups are
+                    allowed even in debt.
+                  </span>
+                  <button className="sm primary" onClick={() => apply(callUpAcademyPlayer(season, team.id))}>
+                    Call up academy player ({money(CONTRACT_RULES.minSalary)})
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        )}
       </table>
     </div>
   );

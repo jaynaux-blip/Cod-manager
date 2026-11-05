@@ -277,6 +277,9 @@ tr.mine td.name { color: var(--accent); }
 .roster-table .section-row td { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); padding-top: 12px; border-bottom: 1px solid var(--border); }
 .roster-table .bench-row td.name { color: var(--ok); font-weight: 500; }
 .roster-table td.expiring { color: var(--accent); }
+.roster-table td.extended { color: var(--good); }
+.academy { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 8px; background: rgba(255, 176, 32, 0.06); text-align: left; flex-wrap: wrap; }
+.season-bar select:disabled { opacity: 0.6; cursor: not-allowed; }
 .swap { display: inline-flex; gap: 4px; align-items: center; }
 .swap select { padding: 3px 6px; font-size: 12px; }
 .badge { margin-left: 6px; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: rgba(77, 163, 255, 0.15); color: var(--team-0); }

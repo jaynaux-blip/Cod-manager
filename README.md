@@ -86,7 +86,14 @@ substitutes.
   deals and veterans take less. Prestigious clubs get up to 10% off and unknown
   clubs pay up to 10% more. Extensions carry a 5% loyalty discount.
 - **Extensions** are agreed in a player's final season and start the season
-  after, so they are checked against next season's payroll.
+  after, so they are checked against next season's payroll. Each player can
+  agree one extension.
+- **Multi-season signings** made mid-season must fit both this season's cap and
+  next season's, where agreed extensions take effect.
+- **Academy call-ups.** A club that cannot field four can call up an academy
+  player at the league minimum, even in debt. AI clubs do the same.
+- **Your club** is chosen before a new league's first match day and is fixed
+  after that.
 - **Roster lock.** Signings and releases are blocked during Champs. Lineup
   changes and extensions are always allowed.
 
@@ -97,7 +104,10 @@ prestige, and merch scaled by fan base, against salaries and operating costs.
 When a stage ends, clubs receive prize money, prestige drifts towards their
 placement, and deep runs grow the fan base. Fans also rise and fall series by
 series. Clubs in debt can only sign players at the league minimum, which
-applies to AI clubs too.
+applies to AI clubs too. AI clubs only make a preseason upgrade with a season
+of that salary already in the bank, and while in debt they keep extensions
+within 85% of the payroll their recurring income can sustain, so they work
+their way back out instead of spiralling.
 
 ## Offseason
 

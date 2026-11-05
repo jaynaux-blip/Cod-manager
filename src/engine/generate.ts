@@ -108,7 +108,10 @@ export function generatePlayer(rng: Rng, id: string, name: string, role: Role, t
 export function withStartingContracts(rng: Rng, team: Team): Team {
   const sign = (p: Player): Player => ({
     ...p,
-    contract: { salary: roundTo(marketValue(p) * rng.range(0.8, 1.1)), years: rng.int(1, CONTRACT_RULES.maxYears) },
+    contract: {
+      salary: Math.max(CONTRACT_RULES.minSalary, roundTo(marketValue(p) * rng.range(0.8, 1.1))),
+      years: rng.int(1, CONTRACT_RULES.maxYears),
+    },
   });
   let players = team.players.map(sign);
   let bench = team.bench.map(sign);

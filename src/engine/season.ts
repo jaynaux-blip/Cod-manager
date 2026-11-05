@@ -214,7 +214,7 @@ export function lineupProblem(season: Season): string | null {
   const n = team.players.length;
   if (n === CONTRACT_RULES.lineupSize) return null;
   return n < CONTRACT_RULES.lineupSize
-    ? `${team.name} only has ${n} starters. Start a substitute or sign a free agent.`
+    ? `${team.name} only has ${n} starters. Start a substitute, sign a free agent, or call up an academy player.`
     : `${team.name} has ${n} starters. Move someone to the bench.`;
 }
 

@@ -109,9 +109,12 @@ export function applyPlacement(
   const R = FINANCE_RULES;
   const w = R.prestigeWeight[kind];
   const target = R.prestigeTarget[place] ?? 20;
+  // Always move at least one point towards the target, so rounding never stalls prestige short of it.
+  let prestige = Math.round(fin.prestige * (1 - w) + target * w);
+  if (prestige === fin.prestige && target !== fin.prestige) prestige += Math.sign(target - fin.prestige);
   let next: TeamFinances = {
     ...fin,
-    prestige: Math.round(clamp(fin.prestige * (1 - w) + target * w, 0, 100)),
+    prestige: clamp(prestige, 0, 100),
     fans: round1(fin.fans * (R.fansOnPlacement[place] ?? 1)),
   };
   const prize = R.prize[kind][place] ?? 0;
@@ -132,6 +135,17 @@ export function summarize(fin: TeamFinances, year: number): FinanceSummary {
   const income = INCOME_KINDS.reduce((s, k) => s + byKind[k], 0);
   const expenses = EXPENSE_KINDS.reduce((s, k) => s + byKind[k], 0);
   return { byKind, income, expenses, net: income + expenses };
+}
+
+/**
+ * The payroll a club can carry without losing money before prize money:
+ * recurring income at current prestige and fans, minus operating costs.
+ */
+export function sustainablePayroll(fin: TeamFinances): number {
+  const R = FINANCE_RULES;
+  const seasonDays = 40;
+  const merch = fin.fans * R.merchPerThousandFansPerDay * seasonDays;
+  return Math.max(0, R.leagueShare + sponsorIncome(fin.prestige) + merch - R.operations);
 }
 
 /** Balance at season end if nothing changes and no more prize money is won. */

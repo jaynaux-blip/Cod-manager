@@ -77,7 +77,9 @@ export function aiPrepareRosters(
       const years = rng.int(1, CONTRACT_RULES.maxYears);
       const pick = bestAffordable(team, pool, prestige, years);
       const weakest = Math.min(...team.players.map(overall));
-      if (pick && overall(pick.player) >= weakest + 3) sign(pick.player, pick.salary, years);
+      // Only upgrade with a season of the new salary already in the bank.
+      const cash = finances[team.id]?.balance ?? 0;
+      if (pick && overall(pick.player) >= weakest + 3 && cash >= pick.salary) sign(pick.player, pick.salary, years);
     }
 
     if (changed || opts.upgrades || team.players.length < CONTRACT_RULES.lineupSize) out[i] = autoLineup(team);
@@ -106,9 +108,11 @@ function bestAffordable(
 /**
  * End of season: decide which final-year players to extend. Clubs keep players
  * close to their lineup level if next season's cap allows, and some players
- * test free agency regardless.
+ * test free agency regardless. Clubs in debt also keep next season's payroll
+ * within `budget`, the payroll their recurring income can sustain, so debt
+ * shrinks instead of compounding.
  */
-export function aiExtendExpiring(team: Team, prestige: number, rng: Rng): Team {
+export function aiExtendExpiring(team: Team, prestige: number, rng: Rng, budget = Infinity): Team {
   const avg = team.players.reduce((s, p) => s + overall(p), 0) / Math.max(1, team.players.length);
   let t = team;
   for (const p of rosterOf(team)) {
@@ -117,7 +121,9 @@ export function aiExtendExpiring(team: Team, prestige: number, rng: Rng): Team {
     if (overall(p) < avg - 4 || p.age >= 31 || rng.chance(0.15)) continue;
     const years = rng.int(1, CONTRACT_RULES.maxYears);
     const salary = askingSalary(p, years, prestige, true);
-    if (!fitsUnderCap(nextSeasonPayroll(t), salary)) continue;
+    const next = nextSeasonPayroll(t);
+    if (!fitsUnderCap(next, salary)) continue;
+    if (salary > CONTRACT_RULES.minSalary && next + salary > budget) continue;
     t = updatePlayer(t, p.id, (x) => ({ ...x, contract: { ...c, extension: { salary, years } } }));
   }
   return t;
