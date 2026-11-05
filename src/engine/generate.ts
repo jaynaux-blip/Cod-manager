@@ -3,6 +3,7 @@
  */
 import { CONTRACT_RULES, marketValue, roundTo } from "./contracts";
 import { clamp, Rng } from "./rng";
+import { withDevelopment } from "./scouting";
 import type { Attributes, Player, Role, Team } from "./types";
 
 /** Fictional orgs: city, name, tag. Tags are unique. */
@@ -69,9 +70,11 @@ const ROLES: Role[] = ["AR", "SMG", "Flex"];
 export function generateTeam(rng: Rng, id: string, opts: GenerateOptions, org = rng.pick(ORGS)): Team {
   const names = opts.names ?? new NameGen(rng.fork("names"));
   const spread = opts.spread ?? 6;
-  const players = ROLE_SET.map((role, i) => generatePlayer(rng, `${id}-p${i}`, names.next(), role, opts.tier, spread));
+  const players = ROLE_SET.map((role, i) =>
+    withDevelopment(generatePlayer(rng, `${id}-p${i}`, names.next(), role, opts.tier, spread), rng),
+  );
   const bench = Array.from({ length: opts.bench ?? 0 }, (_, i) =>
-    generatePlayer(rng, `${id}-p${ROLE_SET.length + i}`, names.next(), rng.pick(ROLES), opts.tier - 6, spread),
+    withDevelopment(generatePlayer(rng, `${id}-p${ROLE_SET.length + i}`, names.next(), rng.pick(ROLES), opts.tier - 6, spread), rng),
   );
   const team: Team = {
     id,
@@ -159,6 +162,6 @@ export function generateFreeAgents(rng: Rng, opts: FreeAgentOptions): Player[] {
   const names = new NameGen(rng.fork("names"), opts.usedNames);
   return Array.from({ length: opts.count }, (_, i) => {
     const p = generatePlayer(rng, `${opts.idPrefix}-${i}`, names.next(), rng.pick(ROLES), rng.int(...opts.tier), 6);
-    return { ...p, age: rng.int(...opts.age) };
+    return withDevelopment({ ...p, age: rng.int(...opts.age) }, rng);
   });
 }

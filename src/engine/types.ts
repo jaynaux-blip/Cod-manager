@@ -30,6 +30,19 @@ export interface Contract extends ContractTerms {
   extension?: ContractTerms;
 }
 
+/**
+ * Hidden development profile. Never shown to the manager directly: the UI only
+ * shows the scouted range from potentialRange().
+ */
+export interface Development {
+  /** Ceiling on the overall scale. Drifts each offseason until age 23. */
+  potential: number;
+  /** Decline starts after this age. */
+  peakAge: number;
+  /** Fixed scouting error in range half-widths, -2..2. Positive means overhyped. */
+  scoutBias: number;
+}
+
 export interface Player {
   id: string;
   name: string;
@@ -38,6 +51,8 @@ export interface Player {
   attributes: Attributes;
   /** Free agents have no contract. */
   contract?: Contract;
+  /** Generated players always carry this. Hand-built players fall back to devOf(). */
+  dev?: Development;
 }
 
 export interface Tactics {

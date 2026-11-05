@@ -282,6 +282,21 @@ tr.mine td.name { color: var(--accent); }
 .season-bar select:disabled { opacity: 0.6; cursor: not-allowed; }
 .swap { display: inline-flex; gap: 4px; align-items: center; }
 .swap select { padding: 3px 6px; font-size: 12px; }
+.delta { margin-left: 4px; font-size: 11px; font-weight: 700; }
+.delta.up { color: var(--good); }
+.delta.down { color: var(--team-1); }
+.badge.warn { background: rgba(255, 176, 32, 0.15); color: var(--accent); }
+.badge.note-breakout { background: rgba(74, 222, 128, 0.15); color: var(--good); }
+.badge.note-stalled, .badge.note-declining { background: rgba(255, 93, 115, 0.15); color: var(--team-1); }
+td.pot { white-space: nowrap; }
+.training-levels { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 10px 0; }
+.training-level { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; text-align: left; }
+.training-level.active { border-color: var(--accent); background: rgba(255, 176, 32, 0.08); opacity: 1; }
+.dev-table th:nth-child(n+2), .dev-table td:nth-child(n+2) { text-align: center; }
+.dev-table td { white-space: nowrap; }
+.dev-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 900px) { .dev-columns { grid-template-columns: 1fr; } }
+.chips-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
 .badge { margin-left: 6px; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: rgba(77, 163, 255, 0.15); color: var(--team-0); }
 
 .negotiation { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; text-align: left; }

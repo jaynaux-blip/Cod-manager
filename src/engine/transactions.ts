@@ -15,8 +15,9 @@ import {
   updatePlayer,
 } from "./contracts";
 import { CALL_UP_TIER } from "./ai";
-import { post } from "./finance";
+import { post, TRAINING_LEVELS } from "./finance";
 import { generatePlayer, NameGen } from "./generate";
+import { withDevelopment } from "./scouting";
 import { Rng } from "./rng";
 import { isFinished, teamById, type Season } from "./season";
 import type { ContractTerms, Player, Team } from "./types";
@@ -210,11 +211,27 @@ export function callUpAcademyPlayer(season: Season, teamId: string): TxResult {
   const names = new NameGen(rng.fork("names"), everyone.map((p) => p.name));
   const base = generatePlayer(rng, `${prefix}${n}`, names.next(), rng.pick(["AR", "SMG", "Flex"] as const), CALL_UP_TIER, 4);
   const player: Player = {
-    ...base,
-    age: rng.int(18, 20),
+    ...withDevelopment({ ...base, age: rng.int(18, 20) }, rng),
     // In the offseason the finished season still counts until rollover.
     contract: { salary: CONTRACT_RULES.minSalary, years: isOffseason(season) ? 2 : 1 },
   };
   const next = replaceTeam(season, addToRoster(team, player));
   return { ok: true, season: next, message: `${player.name} is called up from the academy on a ${money(CONTRACT_RULES.minSalary)} deal.` };
+}
+
+/**
+ * Set the club's training program. The cost is charged per match day from
+ * now on. Raising it is refused while the club is in debt; lowering is always
+ * allowed.
+ */
+export function setTrainingLevel(season: Season, teamId: string, level: number): TxResult {
+  const fin = season.finances[teamId];
+  const program = TRAINING_LEVELS[level];
+  if (!program || !Number.isInteger(level)) return fail("Unknown training program.");
+  if (level === fin.training) return fail(`The club already runs ${level === 0 ? "no program" : `the ${program.name} program`}.`);
+  if (level > fin.training && fin.balance < 0) return fail("The club is in debt and cannot raise its training spend.");
+  const next = { ...season, finances: { ...season.finances, [teamId]: { ...fin, training: level } } };
+  const message =
+    level === 0 ? "Training program cancelled." : `${program.name}: ${money(program.cost)} a season, charged per match day.`;
+  return { ok: true, season: next, message };
 }

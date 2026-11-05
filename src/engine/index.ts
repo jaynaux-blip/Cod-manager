@@ -14,3 +14,5 @@ export * from "./finance";
 export * from "./ai";
 export * from "./transactions";
 export * from "./league";
+export * from "./scouting";
+export * from "./development";

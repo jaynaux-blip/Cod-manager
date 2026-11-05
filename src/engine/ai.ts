@@ -12,9 +12,10 @@ import {
   rosterOf,
   updatePlayer,
 } from "./contracts";
-import type { TeamFinances } from "./finance";
+import { sustainablePayroll, TRAINING_LEVELS, type TeamFinances } from "./finance";
 import { generatePlayer, NameGen } from "./generate";
 import { overall } from "./ratings";
+import { outlook, withDevelopment } from "./scouting";
 import type { Rng } from "./rng";
 import type { Player, Role, Team } from "./types";
 
@@ -52,9 +53,11 @@ export function aiPrepareRosters(
   for (const i of order) {
     let team = out[i];
     let changed = false;
-    const prestige = finances[team.id]?.prestige ?? 50;
+    const fin = finances[team.id];
+    const prestige = fin?.prestige ?? 50;
     // Clubs in debt follow the same rule as the manager: no deals above the minimum.
-    const inDebt = (finances[team.id]?.balance ?? 0) < 0;
+    const inDebt = (fin?.balance ?? 0) < 0;
+    const budget = fin ? aiPayrollBudget(fin) : Infinity;
     const sign = (p: Player, salary: number, years: number) => {
       team = addToRoster(team, { ...p, contract: { salary, years } });
       pool = pool.filter((x) => x.id !== p.id);
@@ -63,19 +66,21 @@ export function aiPrepareRosters(
 
     while (rosterOf(team).length < CONTRACT_RULES.lineupSize) {
       const years = rng.int(1, 2);
-      const pick = bestAffordable(team, pool, prestige, years, inDebt);
+      // A solvent club over budget still prefers the cheapest real free agent to an academy kid.
+      const pick = bestAffordable(team, pool, prestige, years, budget, inDebt) ?? (inDebt ? null : cheapestAffordable(team, pool, prestige, years));
       if (pick) {
         sign(pick.player, pick.salary, years);
       } else {
         const role: Role = rng.pick(["AR", "SMG", "Flex"]);
         const callUp = generatePlayer(rng, `${opts.idPrefix}-${callUps++}`, names.next(), role, CALL_UP_TIER, 4);
-        sign({ ...callUp, age: rng.int(18, 20) }, CONTRACT_RULES.minSalary, 1);
+        sign(withDevelopment({ ...callUp, age: rng.int(18, 20) }, rng), CONTRACT_RULES.minSalary, 1);
       }
     }
 
     if (opts.upgrades && !inDebt && rosterOf(team).length < CONTRACT_RULES.rosterMax) {
       const years = rng.int(1, CONTRACT_RULES.maxYears);
-      const pick = bestAffordable(team, pool, prestige, years);
+      // An upgrade has to help now, so rank by current rating rather than outlook.
+      const pick = bestAffordable(team, pool, prestige, years, budget, false, "overall");
       const weakest = Math.min(...team.players.map(overall));
       // Only upgrade with a season of the new salary already in the bank.
       const cash = finances[team.id]?.balance ?? 0;
@@ -87,22 +92,44 @@ export function aiPrepareRosters(
   return { teams: out, freeAgents: pool };
 }
 
-/** Highest-rated free agent the club can fit under the cap at their asking price. */
+/**
+ * Best free agent the club can fit under the cap and its payroll budget at
+ * their asking price. Filling a gap ranks by scouted outlook, so prospects get
+ * signed and played; an upgrade ranks by current rating. Minimum deals always
+ * fit, as they do for the manager.
+ */
 function bestAffordable(
   team: Team,
   pool: Player[],
   prestige: number,
   years: number,
+  budget: number,
   minimumOnly = false,
+  rank: "outlook" | "overall" = "outlook",
 ): { player: Player; salary: number } | null {
   const current = payroll(team);
-  const sorted = pool.slice().sort((a, b) => overall(b) - overall(a));
+  const score = rank === "outlook" ? outlook : overall;
+  const sorted = pool.slice().sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id));
   for (const player of sorted) {
     const salary = askingSalary(player, years, prestige);
-    if (minimumOnly && salary > CONTRACT_RULES.minSalary) continue;
+    const minimum = salary <= CONTRACT_RULES.minSalary;
+    if (minimumOnly && !minimum) continue;
+    if (!minimum && current + salary > budget) continue;
     if (fitsUnderCap(current, salary)) return { player, salary };
   }
   return null;
+}
+
+/** Cheapest free agent who fits under the cap, best outlook first among equal asks. */
+function cheapestAffordable(team: Team, pool: Player[], prestige: number, years: number): { player: Player; salary: number } | null {
+  const current = payroll(team);
+  let best: { player: Player; salary: number } | null = null;
+  for (const player of pool) {
+    const salary = askingSalary(player, years, prestige);
+    if (!fitsUnderCap(current, salary)) continue;
+    if (!best || salary < best.salary || (salary === best.salary && outlook(player) > outlook(best.player))) best = { player, salary };
+  }
+  return best;
 }
 
 /**
@@ -114,12 +141,14 @@ function bestAffordable(
  */
 export function aiExtendExpiring(team: Team, prestige: number, rng: Rng, budget = Infinity): Team {
   const avg = team.players.reduce((s, p) => s + overall(p), 0) / Math.max(1, team.players.length);
+  // Judged on the scouted outlook, so prospects below the lineup average can still be kept.
   let t = team;
   for (const p of rosterOf(team)) {
     const c = p.contract;
     if (!c || c.years !== 1 || c.extension) continue;
-    if (overall(p) < avg - 4 || p.age >= 31 || rng.chance(0.15)) continue;
-    const years = rng.int(1, CONTRACT_RULES.maxYears);
+    if (outlook(p) < avg - 4 || p.age >= 30 || rng.chance(0.15)) continue;
+    // Veterans only get one season at a time now that decline is real.
+    const years = p.age >= 28 ? Math.min(1, rng.int(1, CONTRACT_RULES.maxYears)) : rng.int(1, CONTRACT_RULES.maxYears);
     const salary = askingSalary(p, years, prestige, true);
     const next = nextSeasonPayroll(t);
     if (!fitsUnderCap(next, salary)) continue;
@@ -127,4 +156,42 @@ export function aiExtendExpiring(team: Team, prestige: number, rng: Rng, budget 
     t = updatePlayer(t, p.id, (x) => ({ ...x, contract: { ...c, extension: { salary, years } } }));
   }
   return t;
+}
+
+/**
+ * How AI clubs set their payroll budget: what recurring income sustains, plus
+ * the prize money a club of their prestige can expect, plus a share of cash
+ * above a reserve. Clubs in debt budget below break-even, without counting on
+ * prize money, so they climb back out.
+ */
+export const AI_PAYROLL_POLICY = { reserve: 1_000_000, surplusShare: 0.25, debtShare: 0.85, expectedPrizePerPrestige: 4_000 };
+
+export function aiPayrollBudget(fin: TeamFinances): number {
+  const P = AI_PAYROLL_POLICY;
+  const base = sustainablePayroll(fin);
+  if (fin.balance < 0) return base * P.debtShare;
+  return base + fin.prestige * P.expectedPrizePerPrestige + Math.max(0, fin.balance - P.reserve) * P.surplusShare;
+}
+
+/**
+ * How AI clubs fund training: they keep `reserve` in cash and spend up to
+ * `share` of what is above it. The economy harness raises the reserve to
+ * switch AI training off for comparison.
+ */
+export const AI_TRAINING_POLICY = { reserve: 1_000_000, share: 0.75 };
+
+/**
+ * AI training level. In preseason a club spends up to three quarters of its cash above the
+ * reserve, which drains the surplus rich clubs would otherwise hoard. A club
+ * in debt drops to no program on any day.
+ */
+export function aiTrainingLevel(fin: TeamFinances, preseason: boolean): number {
+  if (fin.balance < 0) return 0;
+  if (!preseason) return fin.training;
+  const budget = (fin.balance - AI_TRAINING_POLICY.reserve) * AI_TRAINING_POLICY.share;
+  let level = 0;
+  TRAINING_LEVELS.forEach((l, i) => {
+    if (l.cost <= budget) level = i;
+  });
+  return level;
 }

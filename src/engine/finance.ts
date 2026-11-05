@@ -9,10 +9,10 @@ import { overall } from "./ratings";
 import { clamp } from "./rng";
 import type { Team } from "./types";
 
-export type LedgerKind = "league" | "sponsor" | "merch" | "prize" | "salary" | "operations" | "buyout";
+export type LedgerKind = "league" | "sponsor" | "merch" | "prize" | "salary" | "operations" | "training" | "buyout";
 
 export const INCOME_KINDS: LedgerKind[] = ["league", "sponsor", "merch", "prize"];
-export const EXPENSE_KINDS: LedgerKind[] = ["salary", "operations", "buyout"];
+export const EXPENSE_KINDS: LedgerKind[] = ["salary", "operations", "training", "buyout"];
 
 export const LEDGER_LABEL: Record<LedgerKind, string> = {
   league: "League revenue share",
@@ -21,6 +21,7 @@ export const LEDGER_LABEL: Record<LedgerKind, string> = {
   prize: "Prize money",
   salary: "Player salaries",
   operations: "Staff and operations",
+  training: "Coaching and facilities",
   buyout: "Contract buyouts",
 };
 
@@ -39,8 +40,33 @@ export interface TeamFinances {
   prestige: number;
   /** Fan base in thousands. Drives merch and viewership income. */
   fans: number;
+  /** Training program level, an index into TRAINING_LEVELS. */
+  training: number;
   ledger: LedgerEntry[];
 }
+
+/**
+ * Training programs. The cost is charged per match day. The development
+ * effect comes from what was actually spent that season, so switching level
+ * late in a season buys only a fraction of the effect.
+ */
+export const TRAINING_LEVELS = [
+  { name: "None", cost: 0 },
+  { name: "Analyst", cost: 250_000 },
+  { name: "Coaching staff", cost: 550_000 },
+  { name: "Performance center", cost: 900_000 },
+  { name: "Elite program", cost: 1_400_000 },
+] as const;
+
+/** Development boost from a season's training spend: 0 to 0.5, with diminishing returns. */
+export const trainingBoost = (spend: number): number => 0.5 * (1 - Math.exp(-Math.max(0, spend) / 700_000));
+
+/** What a club spent on training in a season. */
+export function trainingSpend(fin: TeamFinances, year: number): number {
+  return -fin.ledger.reduce((s, e) => (e.year === year && e.kind === "training" ? s + e.amount : s), 0);
+}
+
+export const trainingCost = (fin: TeamFinances): number => TRAINING_LEVELS[fin.training]?.cost ?? 0;
 
 export const FINANCE_RULES = {
   /** Paid to every club per season, spread across match days. */
@@ -60,14 +86,29 @@ export const FINANCE_RULES = {
   /** How hard one stage pulls prestige towards its target. */
   prestigeWeight: { major: 0.2, champs: 0.35 },
   fansOnPlacement: { 1: 1.05, 2: 1.03, 3: 1.01, 4: 1.01 } as Record<number, number>,
+  /**
+   * Share of a fan base above or below its prestige baseline that survives the
+   * offseason. Without it a dynasty's fans compound forever and its merch
+   * income outgrows every way to spend it.
+   */
+  fanRetention: 0.7,
 };
 
 const round1 = (v: number): number => Math.round(v * 10) / 10;
 
+/** The fan base a club of this prestige settles towards, in thousands. */
+export const fanBaseline = (prestige: number): number => 50 + prestige * 3;
+
+/** Offseason: fan bases drift back towards their prestige baseline. */
+export function settleFans(fin: TeamFinances): TeamFinances {
+  const base = fanBaseline(fin.prestige);
+  return { ...fin, fans: round1(base + (fin.fans - base) * FINANCE_RULES.fanRetention) };
+}
+
 export function initialFinances(team: Team): TeamFinances {
   const ovr = team.players.reduce((s, p) => s + overall(p), 0) / Math.max(1, team.players.length);
   const prestige = Math.round(clamp((ovr - 65) * 4, 10, 90));
-  return { balance: 500_000 + prestige * 10_000, prestige, fans: 50 + prestige * 3, ledger: [] };
+  return { balance: 500_000 + prestige * 10_000, prestige, fans: fanBaseline(prestige), training: 0, ledger: [] };
 }
 
 export const sponsorIncome = (prestige: number): number =>
@@ -83,6 +124,7 @@ export function dailyEntries(team: Team, fin: TeamFinances, year: number, day: n
     { year, day, kind: "merch", amount: Math.round(fin.fans * R.merchPerThousandFansPerDay) },
     { year, day, kind: "salary", amount: -perDay(payroll(team)) },
     { year, day, kind: "operations", amount: -perDay(R.operations) },
+    { year, day, kind: "training", amount: -perDay(trainingCost(fin)) },
   ];
   return entries.filter((e) => e.amount !== 0);
 }
@@ -145,7 +187,7 @@ export function sustainablePayroll(fin: TeamFinances): number {
   const R = FINANCE_RULES;
   const seasonDays = 40;
   const merch = fin.fans * R.merchPerThousandFansPerDay * seasonDays;
-  return Math.max(0, R.leagueShare + sponsorIncome(fin.prestige) + merch - R.operations);
+  return Math.max(0, R.leagueShare + sponsorIncome(fin.prestige) + merch - R.operations - trainingCost(fin));
 }
 
 /** Balance at season end if nothing changes and no more prize money is won. */

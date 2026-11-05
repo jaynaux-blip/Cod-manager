@@ -12,20 +12,28 @@ import {
   INCOME_KINDS,
   isFinished,
   LEDGER_LABEL,
+  mapsPlayed,
   marketValue,
   money,
   nextSeasonPayroll,
   nextSeasonSalary,
   overall,
   payroll,
+  potentialRange,
   projectedBalance,
   releasePlayer,
+  retirementChance,
   rosterLocked,
   rosterOf,
+  setTrainingLevel,
   signFreeAgent,
   startPlayer,
   summarize,
   teamById,
+  TRAINING_LEVELS,
+  trainingBoost,
+  trainingSpend,
+  type DevChange,
   type Player,
   type Role,
   type Season,
@@ -83,6 +91,7 @@ export function ClubView({ season, setSeason }: Props) {
             setNegotiation={setNegotiation}
             apply={apply}
           />
+          <DevelopmentPanel season={season} team={team} />
           <FreeAgentPanel
             season={season}
             team={team}
@@ -92,6 +101,7 @@ export function ClubView({ season, setSeason }: Props) {
           />
         </div>
         <div className="club-right">
+          <TrainingPanel season={season} team={team} apply={apply} />
           <FinancePanel season={season} team={team} />
           <LeagueMoneyPanel season={season} />
         </div>
@@ -172,12 +182,65 @@ function contractLabel(p: Player, offseason: boolean): string {
   return `${left} ${left === 1 ? "season" : "seasons"}${ext}`;
 }
 
+const PROSPECT_AGE = 21;
+
+/** Ceiling range from scouts, or "Est." once a player is established. */
+function PotCell({ p }: { p: Player }) {
+  const range = potentialRange(p);
+  return (
+    <td className="muted pot" title="Scouts' projected ceiling. It narrows as the player matures and can be wrong.">
+      {rangeText(range)}
+    </td>
+  );
+}
+
+/** Change in overall at the last development, from the report. */
+function changeFor(season: Season, playerId: string): DevChange | undefined {
+  return season.development?.changes.find((c) => c.playerId === playerId);
+}
+
+function OvrCell({ p, change }: { p: Player; change?: DevChange }) {
+  const d = change ? change.after - change.before : 0;
+  return (
+    <td className="strong">
+      {overall(p)}
+      {d !== 0 && <span className={`delta ${d > 0 ? "up" : "down"}`}>{d > 0 ? `▲${d}` : `▼${-d}`}</span>}
+    </td>
+  );
+}
+
+/**
+ * Chance a player in the last season of his deal retires if he is unsigned
+ * when the next season starts. Development, and the birthday, happen when
+ * Champs ends, so during the season the risk is judged a year older.
+ */
+function retirementRisk(season: Season, p: Player): number {
+  const c = p.contract;
+  if (!c || c.years !== 1 || c.extension) return 0;
+  return retirementChance(isFinished(season) ? p : { ...p, age: p.age + 1 }, false);
+}
+
+function PlayerBadges({ season, p }: { season: Season; p: Player }) {
+  const risk = retirementRisk(season, p);
+  return (
+    <>
+      {p.age <= PROSPECT_AGE && <span className="badge">Prospect</span>}
+      {risk >= 0.05 && (
+        <span className="badge warn" title="Chance he retires if he is unsigned when the next season starts. Extend him to keep him.">
+          Retire risk {Math.round(risk * 100)}%
+        </span>
+      )}
+    </>
+  );
+}
+
 function RosterPanel({ season, team, negotiation, setNegotiation, apply }: PanelProps) {
   const offseason = isFinished(season);
   const locked = rosterLocked(season);
   const [confirmRelease, setConfirmRelease] = useState<string | null>(null);
   const [swapFor, setSwapFor] = useState<Record<string, string>>({});
   const lineupFull = team.players.length >= CONTRACT_RULES.lineupSize;
+  const maps = useMemo(() => mapsPlayed(season), [season]);
 
   const row = (p: Player, starter: boolean) => {
     const c = p.contract;
@@ -188,10 +251,15 @@ function RosterPanel({ season, team, negotiation, setNegotiation, apply }: Panel
     return (
       <tbody key={p.id}>
         <tr className={starter ? "" : "bench-row"}>
-          <td className="name">{p.name}</td>
+          <td className="name">
+            {p.name}
+            <PlayerBadges season={season} p={p} />
+          </td>
           <td className="muted">{p.role}</td>
           <td className="muted">{p.age}</td>
-          <td className="strong">{overall(p)}</td>
+          <OvrCell p={p} change={changeFor(season, p.id)} />
+          <PotCell p={p} />
+          <td className="muted" title="Maps played this season. Starters develop fastest.">{maps[p.id] ?? 0}</td>
           <td className="muted">{money(marketValue(p))}</td>
           <td>{c ? money(c.salary) : "-"}</td>
           <td className={c?.years === 1 && !c.extension ? "expiring" : c?.extension ? "extended" : "muted"}>{contractLabel(p, offseason)}</td>
@@ -243,7 +311,7 @@ function RosterPanel({ season, team, negotiation, setNegotiation, apply }: Panel
         </tr>
         {negotiating && (
           <tr>
-            <td colSpan={8}>
+            <td colSpan={10}>
               <NegotiationForm
                 season={season}
                 team={team}
@@ -269,6 +337,8 @@ function RosterPanel({ season, team, negotiation, setNegotiation, apply }: Panel
             <th>Role</th>
             <th>Age</th>
             <th>OVR</th>
+            <th title="Scouts' projected ceiling">POT</th>
+            <th title="Maps played this season">Maps</th>
             <th title="What the player is worth on the open market">Value</th>
             <th>Salary</th>
             <th>Contract</th>
@@ -277,17 +347,17 @@ function RosterPanel({ season, team, negotiation, setNegotiation, apply }: Panel
         </thead>
         <tbody>
           <tr className="section-row">
-            <td colSpan={8}>Lineup ({team.players.length}/4)</td>
+            <td colSpan={10}>Lineup ({team.players.length}/4)</td>
           </tr>
         </tbody>
         {team.players.map((p) => row(p, true))}
         <tbody>
           <tr className="section-row">
-            <td colSpan={8}>Bench ({team.bench.length})</td>
+            <td colSpan={10}>Bench ({team.bench.length})</td>
           </tr>
           {team.bench.length === 0 && (
             <tr>
-              <td colSpan={8} className="muted small">
+              <td colSpan={10} className="muted small">
                 No substitutes. Sign a free agent to add depth.
               </td>
             </tr>
@@ -297,7 +367,7 @@ function RosterPanel({ season, team, negotiation, setNegotiation, apply }: Panel
         {rosterOf(team).length < CONTRACT_RULES.lineupSize && (
           <tbody>
             <tr>
-              <td colSpan={8}>
+              <td colSpan={10}>
                 <div className="academy">
                   <span>
                     The club cannot field four. Sign a free agent, or call up an academy player at the league minimum. Call-ups are
@@ -320,15 +390,16 @@ const ROLE_FILTERS: (Role | "All")[] = ["All", "AR", "SMG", "Flex"];
 
 function FreeAgentPanel({ season, team, negotiation, setNegotiation, apply }: PanelProps) {
   const [role, setRole] = useState<Role | "All">("All");
+  const [prospectsOnly, setProspectsOnly] = useState(false);
   const locked = rosterLocked(season);
   const full = rosterOf(team).length >= CONTRACT_RULES.rosterMax;
   const agents = useMemo(
     () =>
       season.freeAgents
-        .filter((p) => role === "All" || p.role === role)
+        .filter((p) => (role === "All" || p.role === role) && (!prospectsOnly || p.age <= PROSPECT_AGE))
         .slice()
         .sort((a, b) => overall(b) - overall(a)),
-    [season.freeAgents, role],
+    [season.freeAgents, role, prospectsOnly],
   );
 
   return (
@@ -341,6 +412,9 @@ function FreeAgentPanel({ season, team, negotiation, setNegotiation, apply }: Pa
               {r}
             </button>
           ))}
+          <button className={`chip ${prospectsOnly ? "active" : ""}`} onClick={() => setProspectsOnly(!prospectsOnly)}>
+            Prospects
+          </button>
         </div>
       </div>
       {full && <p className="muted small">Your roster is full. Release a player to make room.</p>}
@@ -351,6 +425,7 @@ function FreeAgentPanel({ season, team, negotiation, setNegotiation, apply }: Pa
             <th>Role</th>
             <th>Age</th>
             <th>OVR</th>
+            <th title="Scouts' projected ceiling">POT</th>
             <th>AIM</th>
             <th>POS</th>
             <th>IQ</th>
@@ -369,7 +444,8 @@ function FreeAgentPanel({ season, team, negotiation, setNegotiation, apply }: Pa
                 </td>
                 <td className="muted">{p.role}</td>
                 <td className="muted">{p.age}</td>
-                <td className="strong">{overall(p)}</td>
+                <OvrCell p={p} change={changeFor(season, p.id)} />
+                <PotCell p={p} />
                 <td className="muted">{p.attributes.aim}</td>
                 <td className="muted">{p.attributes.positioning}</td>
                 <td className="muted">{p.attributes.gameSense}</td>
@@ -386,7 +462,7 @@ function FreeAgentPanel({ season, team, negotiation, setNegotiation, apply }: Pa
               </tr>
               {negotiating && (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={10}>
                     <NegotiationForm
                       season={season}
                       team={team}
@@ -556,6 +632,7 @@ function LeagueMoneyPanel({ season }: { season: Season }) {
             <th>Club</th>
             <th>Payroll</th>
             <th>Balance</th>
+            <th title="Training program level, 0 to 4">Train.</th>
             <th title="Prestige">Pres.</th>
           </tr>
         </thead>
@@ -568,11 +645,167 @@ function LeagueMoneyPanel({ season }: { season: Season }) {
               </td>
               <td>{money(pay)}</td>
               <td className={fin.balance < 0 ? "bad" : ""}>{money(fin.balance)}</td>
+              <td className="muted" title={TRAINING_LEVELS[fin.training].name}>{fin.training}</td>
               <td className="muted">{fin.prestige}</td>
             </tr>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function TrainingPanel({ season, team, apply }: { season: Season; team: Team; apply: (r: TxResult) => void }) {
+  const fin = season.finances[team.id];
+  const spent = trainingSpend(fin, season.year);
+  const boost = trainingBoost(spent);
+  return (
+    <div className="card">
+      <h3 className="panel-title">Training program</h3>
+      <p className="muted small">
+        Faster growth for young players and slower decline for veterans. It never raises a player's ceiling. The effect is
+        based on what you actually spend this season, and it applies when Champs ends.
+      </p>
+      <div className="training-levels">
+        {TRAINING_LEVELS.map((l, i) => (
+          <button
+            key={l.name}
+            className={`training-level ${fin.training === i ? "active" : ""}`}
+            disabled={fin.training === i}
+            onClick={() => apply(setTrainingLevel(season, team.id, i))}
+          >
+            <strong>{l.name}</strong>
+            <span className="muted small">{l.cost ? `${money(l.cost)} a season` : "Free"}</span>
+            <span className="muted small">up to +{Math.round(trainingBoost(l.cost) * 100)}% growth</span>
+          </button>
+        ))}
+      </div>
+      <p className="small">
+        Spent this season: <strong>{money(spent)}</strong>. Development boost so far:{" "}
+        <strong className={boost > 0 ? "good" : "muted"}>+{Math.round(boost * 100)}%</strong>
+      </p>
+    </div>
+  );
+}
+
+const NOTE_LABEL: Record<NonNullable<DevChange["note"]>, string> = {
+  breakout: "Breakout",
+  stalled: "Stalled",
+  declining: "Declining",
+};
+
+function rangeText(r: [number, number] | null): string {
+  if (!r) return "Est.";
+  return r[0] === r[1] ? `${r[0]}` : `${r[0]}-${r[1]}`;
+}
+
+function DevelopmentPanel({ season, team }: { season: Season; team: Team }) {
+  const report = season.development;
+  if (!report) {
+    return (
+      <div className="card">
+        <h3 className="panel-title">Development</h3>
+        <p className="muted small">
+          Players develop once a year, when Champs ends. Young players grow towards their ceiling, faster with minutes and
+          training. Veterans decline from their mid-twenties, aim first.
+        </p>
+      </div>
+    );
+  }
+  const mine = report.changes.filter((c) => c.teamId === team.id).sort((a, b) => b.after - b.before - (a.after - a.before));
+  const others = report.changes.filter((c) => c.teamId !== team.id);
+  const risers = others.slice().sort((a, b) => b.after - b.before - (a.after - a.before)).slice(0, 5);
+  const fallers = others.slice().sort((a, b) => a.after - a.before - (b.after - b.before)).slice(0, 5);
+  const clubTag = (id: string | null) => (id ? season.teams.find((t) => t.id === id)?.tag ?? "-" : "FA");
+  const everyone = [...season.teams.flatMap(rosterOf), ...season.freeAgents];
+  const rookies = report.rookies.map((id) => everyone.find((p) => p.id === id)).filter((p): p is Player => !!p);
+  const delta = (c: DevChange) => {
+    const d = c.after - c.before;
+    return <span className={d > 0 ? "good" : d < 0 ? "bad" : "muted"}>{d > 0 ? `+${d}` : d}</span>;
+  };
+  const changeRow = (c: DevChange, showClub: boolean) => (
+    <tr key={c.playerId}>
+      <td className="name">
+        {c.name}
+        {c.note && <span className={`badge note-${c.note}`}>{NOTE_LABEL[c.note]}</span>}
+      </td>
+      {showClub && <td className="muted">{clubTag(c.teamId)}</td>}
+      <td className="muted">{c.age}</td>
+      <td>
+        {c.before} → <strong>{c.after}</strong> {delta(c)}
+      </td>
+      <td className="muted">{c.maps ?? "-"}</td>
+      <td className="muted">
+        {rangeText(c.rangeBefore)} → {rangeText(c.rangeAfter)}
+      </td>
+    </tr>
+  );
+  const head = (showClub: boolean) => (
+    <thead>
+      <tr>
+        <th>Player</th>
+        {showClub && <th>Club</th>}
+        <th>Age</th>
+        <th>OVR</th>
+        <th>Maps</th>
+        <th>POT</th>
+      </tr>
+    </thead>
+  );
+
+  return (
+    <div className="card">
+      <h3 className="panel-title">Development after season {report.year}</h3>
+      <p className="muted small">
+        Ages shown are for the coming season. Growth depends on age, maps played and training; scouts' ceilings are revised
+        until 23.
+      </p>
+      <h4 className="sub-title">Your players</h4>
+      <table className="dev-table">
+        {head(false)}
+        <tbody>{mine.length ? mine.map((c) => changeRow(c, false)) : <tr><td colSpan={5} className="muted small">No players on the roster when Champs ended.</td></tr>}</tbody>
+      </table>
+      <div className="dev-columns">
+        <div>
+          <h4 className="sub-title">League risers</h4>
+          <table className="dev-table">
+            {head(true)}
+            <tbody>{risers.map((c) => changeRow(c, true))}</tbody>
+          </table>
+        </div>
+        <div>
+          <h4 className="sub-title">League fallers</h4>
+          <table className="dev-table">
+            {head(true)}
+            <tbody>{fallers.map((c) => changeRow(c, true))}</tbody>
+          </table>
+        </div>
+      </div>
+      {report.retired.length > 0 && (
+        <>
+          <h4 className="sub-title">Retired ({report.retired.length})</h4>
+          <ul className="chips-list">
+            {report.retired.map((r) => (
+              <li key={r.playerId}>
+                <strong>{r.name}</strong> <span className="muted small">{r.age}, OVR {r.overall}, {clubTag(r.teamId)}{r.forced ? ", age limit" : ""}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {rookies.length > 0 && (
+        <>
+          <h4 className="sub-title">Rookie class</h4>
+          <ul className="chips-list">
+            {rookies.map((p) => (
+              <li key={p.id}>
+                <strong>{p.name}</strong> <span className="muted small">{p.age}, {p.role}, OVR {overall(p)}, POT {rangeText(potentialRange(p))}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {report.left.length > 0 && <p className="muted small">Left the league unsigned: {report.left.join(", ")}.</p>}
     </div>
   );
 }

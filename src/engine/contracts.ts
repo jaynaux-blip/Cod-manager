@@ -5,6 +5,7 @@
  * live in transactions.ts.
  */
 import { overall } from "./ratings";
+import { valuationOverall } from "./scouting";
 import type { Player, Team } from "./types";
 
 export const CONTRACT_RULES = {
@@ -25,22 +26,25 @@ export const roundTo = (v: number, step = 5_000): number => Math.round(v / step)
 const clampSalary = (v: number): number =>
   Math.min(CONTRACT_RULES.maxSalary, Math.max(CONTRACT_RULES.minSalary, v));
 
-/** Prime earning years are 22-26. Teenagers are unproven, veterans are discounted. */
+/** Prime earning years are 22-26. Teenagers are unproven, veterans are in decline. */
 export function ageFactor(age: number): number {
   if (age < 20) return 0.85;
   if (age < 22) return 0.95;
   if (age <= 26) return 1;
   if (age === 27) return 0.95;
   if (age === 28) return 0.9;
-  return 0.8;
+  if (age === 29) return 0.8;
+  if (age === 30) return 0.7;
+  return 0.6;
 }
 
 /**
- * What a player is worth per season. Exponential in overall rating:
- * roughly $100k at 70, $250k at 80, $390k at 85, $610k at 90.
+ * What a player is worth per season. Exponential in rating: roughly $100k at
+ * 70, $250k at 80, $390k at 85, $610k at 90. Young players are priced on a
+ * share of their scouted upside, never on their hidden ceiling.
  */
 export function marketValue(p: Player): number {
-  return clampSalary(roundTo(40_000 * Math.exp((overall(p) - 60) / 11) * ageFactor(p.age)));
+  return clampSalary(roundTo(40_000 * Math.exp((valuationOverall(p) - 60) / 11) * ageFactor(p.age)));
 }
 
 /**

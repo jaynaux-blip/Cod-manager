@@ -109,6 +109,61 @@ of that salary already in the bank, and while in debt they keep extensions
 within 85% of the payroll their recurring income can sustain, so they work
 their way back out instead of spiralling.
 
+## Player development
+
+Players develop once a year, when Champs ends, so the offseason shows next
+season's ratings and ages before any contract decision. The model lives in
+`src/engine/development.ts` and `src/engine/scouting.ts`.
+
+- **Hidden ceiling.** Every player has a hidden potential, a peak age between
+  22 and 28, and a fixed scouting error. The manager and the AI only ever see
+  the scouted range, which is wide for teenagers, narrows each year and closes
+  at 25. Some prospects are overhyped and some are hidden gems.
+- **Growth** closes about 40% of the gap to the ceiling a season, scaled by
+  age, by minutes and by training. Starters with 60 or more maps develop at the
+  full rate, the bench at half and free agents at 30%. Ceilings drift until
+  23, which produces breakouts and busts.
+- **Decline** starts after the peak age and grows by 0.8 a year, to at most 4
+  a season. Aim falls fastest while game sense and comms keep improving, so
+  veterans become in-game leaders.
+- **Retirement** happens when the next season starts. Unsigned players retire
+  on an age curve, sooner if they are weak; fringe players who sat a whole
+  season unsigned are pushed out. Contracted players only retire at 34. Final
+  year players show their retirement risk so you can extend them first.
+- **Rookie class.** Eight rookies aged 18 to 20 join each year, and the pool is
+  trimmed by scouted outlook so high-ceiling rookies are not cut.
+- **Pricing** includes a share of a young player's visible upside, and
+  veterans are discounted more steeply from 29.
+
+### Training program
+
+| Level | Cost a season | Development boost |
+| --- | --- | --- |
+| None | $0 | 0% |
+| Analyst | $250k | 15% |
+| Coaching staff | $550k | 27% |
+| Performance center | $900k | 36% |
+| Elite program | $1.4M | 43% |
+
+The cost is charged per match day as "Coaching and facilities". The boost is
+based on what was actually spent that season, speeds growth, slows decline by
+half as much, and never raises a ceiling. Raising the program is refused in
+debt. AI clubs fund training from three quarters of their cash above a $1M
+reserve and cancel it in debt. In a controlled test the top program is worth
+about 1.3 overall points over three seasons for the same players.
+
+### AI spending
+
+AI clubs budget payroll from recurring income, expected prize money for their
+prestige, and a quarter of cash above $1M. Gap signings rank free agents by
+scouted outlook, so prospects get minutes; preseason upgrades rank by current
+rating. Fan bases drift 30% of the way back to a prestige baseline each
+offseason, so a dynasty's merch income cannot compound forever.
+
+`npm run economy` tracks all of this over several seasons: rating drift, stars,
+starter age, lineup spread, the richest club, debt, retirements, rookies and a
+training A/B. Add `--no-training` to switch AI training off for comparison.
+
 ## Offseason
 
 After Champs the season stays open for the offseason. Extend the players you
@@ -161,8 +216,6 @@ maps evenly regardless of which side attacks first.
 
 ## Next
 
-In rough order: player aging and development so values change between seasons,
-then morale, media and scouting. Rich clubs currently pile up cash because the
-cap stops money from buying players, so the economy also needs things to spend
-on, such as staff and facilities that speed up development. The engine is UI-free on purpose
+In rough order: morale and chemistry, media and owner expectations, and a
+scouting staff that narrows the scouted ranges. The engine is UI-free on purpose
 so a headless season sim can run thousands of matches for balance testing.

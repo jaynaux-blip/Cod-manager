@@ -10,9 +10,10 @@
  * are resolved on the day they are played, so a season is plain data that can
  * be advanced one match day at a time.
  */
-import { aiPrepareRosters } from "./ai";
+import { aiPrepareRosters, aiTrainingLevel } from "./ai";
 import { BRACKET_DAYS, BRACKET_PLACEMENTS, DOUBLE_ELIM_8, roundRobin, type BracketSource } from "./bracket";
 import { CONTRACT_RULES } from "./contracts";
+import { applySeasonDevelopment, type DevReport } from "./development";
 import { applyPlacement, applySeriesResult, dailyEntries, initialFinances, post, type TeamFinances } from "./finance";
 import { Rng } from "./rng";
 import { simulateSeries } from "./series";
@@ -84,6 +85,11 @@ export interface Season {
   teams: Team[];
   freeAgents: Player[];
   finances: Record<string, TeamFinances>;
+  /**
+   * Latest development report. Set when Champs ends; carried into the next
+   * season with that offseason's retirements and rookie class added.
+   */
+  development?: DevReport;
   stages: Stage[];
   fixtures: Fixture[];
   days: MatchDay[];
@@ -119,6 +125,7 @@ export interface SeasonOptions {
   freeAgents?: Player[];
   /** Carried over from the previous season; new clubs start from initialFinances. */
   finances?: Record<string, TeamFinances>;
+  development?: DevReport;
 }
 
 export function createSeason(seed: string, teams: Team[], opts: SeasonOptions = {}): Season {
@@ -147,6 +154,7 @@ export function createSeason(seed: string, teams: Team[], opts: SeasonOptions = 
     teams,
     freeAgents: opts.freeAgents ?? [],
     finances: Object.fromEntries(teams.map((t) => [t.id, opts.finances?.[t.id] ?? initialFinances(t)])),
+    development: opts.development,
     stages,
     fixtures,
     days,
@@ -274,14 +282,16 @@ export function playNextDay(season: Season): Season {
   }
 
   for (const team of next.teams) {
-    const fin = next.finances[team.id];
+    let fin = next.finances[team.id];
+    if (team.id !== next.userTeamId) fin = { ...fin, training: aiTrainingLevel(fin, season.currentDay === 0) };
     next.finances[team.id] = post(fin, dailyEntries(team, fin, next.year, day.day, next.days.length));
   }
 
   next.currentDay = season.currentDay + 1;
   const stageOver = next.currentDay >= next.days.length || next.days[next.currentDay].stage !== day.stage;
   if (stageOver) finishStage(next, stage, day.day);
-  return next;
+  // The season is over: every player develops and ages before the offseason.
+  return isFinished(next) ? applySeasonDevelopment(next) : next;
 }
 
 export function playStage(season: Season): Season {

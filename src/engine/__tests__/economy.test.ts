@@ -219,7 +219,11 @@ describe("offseason", () => {
     for (const p of expiring) {
       if (p.id === extended?.id) continue;
       expect(rosterOf(after).some((x) => x.id === p.id)).toBe(false);
-      expect(next.freeAgents.some((x) => x.id === p.id)).toBe(true);
+      // Expiring players either enter free agency or retire.
+      const freed = next.freeAgents.some((x) => x.id === p.id);
+      const retired = next.development!.retired.some((r) => r.playerId === p.id);
+      const left = next.development!.left.includes(p.name);
+      expect(freed || retired || left).toBe(true);
     }
     expect(next.freeAgents.some((p) => p.id.startsWith("rk-2"))).toBe(true);
     // Balances carry over.

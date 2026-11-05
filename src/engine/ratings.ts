@@ -1,17 +1,32 @@
-import type { Mode, Player } from "./types";
+import type { AttributeKey, Mode, Player } from "./types";
 import type { Rng } from "./rng";
+
+/** Weights of each attribute in the overall rating. They sum to 1. */
+export const OVERALL_WEIGHTS: Record<AttributeKey, number> = {
+  aim: 0.28,
+  positioning: 0.2,
+  gameSense: 0.2,
+  consistency: 0.12,
+  clutch: 0.1,
+  comms: 0.1,
+};
+
+/** Unrounded overall rating. */
+export function exactOverall(p: Player): number {
+  const a = p.attributes;
+  return (
+    a.aim * OVERALL_WEIGHTS.aim +
+    a.positioning * OVERALL_WEIGHTS.positioning +
+    a.gameSense * OVERALL_WEIGHTS.gameSense +
+    a.consistency * OVERALL_WEIGHTS.consistency +
+    a.clutch * OVERALL_WEIGHTS.clutch +
+    a.comms * OVERALL_WEIGHTS.comms
+  );
+}
 
 /** Weighted overall rating used for display and quick comparisons. */
 export function overall(p: Player): number {
-  const a = p.attributes;
-  return Math.round(
-    a.aim * 0.28 +
-      a.positioning * 0.2 +
-      a.gameSense * 0.2 +
-      a.consistency * 0.12 +
-      a.clutch * 0.1 +
-      a.comms * 0.1,
-  );
+  return Math.round(exactOverall(p));
 }
 
 /**
